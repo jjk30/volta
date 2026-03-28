@@ -1,0 +1,63 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg-primary: #1e1e2e;
+  --bg-secondary: #181825;
+  --bg-surface: #11111b;
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --text-dim: #6c7086;
+  --accent: #89b4fa;
+  --accent-hover: #74c7ec;
+  --green: #a6e3a1;
+  --red: #f38ba8;
+  --yellow: #f9e2af;
+  --border: #313244;
+  --toolbar-bg: #1e1e2e;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* CodeMirror theme overrides */
+.cm-editor {
+  height: 100%;
+  font-size: 13px;
+  background: var(--bg-surface) !important;
+}
+
+.cm-editor .cm-scroller {
+  overflow: auto;
+}
+
+.cm-editor .cm-content {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+.cm-editor.cm-focused {
+  outline: none;
+}
+
+.cm-editor .cm-gutters {
+  background: var(--bg-secondary) !important;
+  border-right: 1px solid var(--border) !important;
+  color: var(--text-dim) !important;
+}
+
+.cm-editor .cm-activeLineGutter {
+  background: var(--bg-primary) !important;
+}
+
+.cm-editor .cm-activeLine {
+  background: rgba(137, 180, 250, 0.05) !important;
+}
