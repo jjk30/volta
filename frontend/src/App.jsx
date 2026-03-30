@@ -11,6 +11,7 @@ function App() {
   const [testbench, setTestbench] = useState(DEFAULT_TESTBENCH)
   const [simResult, setSimResult] = useState(null)
   const [simulating, setSimulating] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [error, setError] = useState(null)
   const [splitPos, setSplitPos] = useState(50)
 
@@ -40,6 +41,30 @@ function App() {
     }
   }, [design, testbench])
 
+  const handleGenerate = useCallback(async (prompt) => {
+    setGenerating(true)
+    setError(null)
+    setSimResult(null)
+    try {
+      const resp = await fetch(`${API_URL}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      })
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({}))
+        throw new Error(detail.detail || `HTTP ${resp.status}`)
+      }
+      const data = await resp.json()
+      setDesign(data.design)
+      setTestbench(data.testbench)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setGenerating(false)
+    }
+  }, [])
+
   const handleMouseDown = useCallback((e) => {
     e.preventDefault()
     const container = e.target.parentElement
@@ -64,6 +89,8 @@ function App() {
         simulating={simulating}
         error={error}
         hasResult={!!simResult}
+        onGenerate={handleGenerate}
+        generating={generating}
       />
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
