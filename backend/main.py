@@ -1,19 +1,24 @@
 """
 Volta — Backend API
-FastAPI server with POST /simulate endpoint.
-Compiles Verilog design + testbench with Icarus Verilog, simulates with vvp,
-parses the resulting VCD, and returns it as JSON.
+FastAPI server with POST /simulate and POST /generate endpoints.
+/simulate — compile + simulate Verilog with Icarus Verilog, return VCD as JSON.
+/generate — take a natural-language prompt, generate Verilog + testbench via Ollama.
 """
 
 import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Make core/ importable
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
+from rtl_generator import call_ollama, extract_verilog
 
 
 app = FastAPI(title="Volta", version="0.1.0")
@@ -236,6 +241,181 @@ async def simulate(req: SimulateRequest):
             stdout=sim_r.stdout,
             stderr=sim_r.stderr,
         )
+
+
+# ---------------------------------------------------------------------------
+# Generate endpoint — natural language → Verilog + testbench
+# ---------------------------------------------------------------------------
+
+class GenerateRequest(BaseModel):
+    prompt: str
+
+
+class GenerateResponse(BaseModel):
+    design: str
+    testbench: str
+
+
+def _generate_verilog(prompt: str) -> str:
+    """Ask Ollama to generate Verilog from a natural language prompt."""
+
+    system_prompt = f"""You are an expert Verilog designer. Given the following request,
+generate synthesizable Verilog code.
+
+Rules:
+1. Use `always @(*)` for combinational logic, `always @(posedge clk)` for sequential.
+2. Outputs driven inside always blocks must be declared as `reg`.
+3. Include a default case in any case statement.
+4. Module name should be a short, descriptive identifier derived from the request.
+5. Return ONLY Verilog. Start with `module` and end with `endmodule`. No explanation.
+
+Request: {prompt}"""
+
+    raw = call_ollama(system_prompt)
+    # Try to extract a clean module
+    code = raw.strip()
+    if "```" in code:
+        parts = code.split("```")
+        for part in parts[1::2]:
+            lines = part.strip().split("\n")
+            if lines and lines[0].strip().lower() in ("verilog", "v", "sv", ""):
+                part = "\n".join(lines[1:])
+            if "module" in part:
+                code = part.strip()
+                break
+
+    start = code.find("module ")
+    if start != -1:
+        code = code[start:]
+    end = code.rfind("endmodule")
+    if end != -1:
+        code = code[:end + len("endmodule")]
+    return code.strip()
+
+
+def _extract_module_info(verilog: str) -> dict:
+    """Parse module name, ports from Verilog code for testbench generation."""
+
+    # Module name
+    m = re.match(r"module\s+(\w+)", verilog)
+    module_name = m.group(1) if m else "top"
+
+    # Ports — find all input/output declarations
+    ports = []
+    for line in verilog.split("\n"):
+        line = line.strip().rstrip(",").rstrip(");")
+        pm = re.match(
+            r"(input|output)\s+(?:reg\s+)?(?:wire\s+)?(\[[\d:]+\]\s+)?(\w+)",
+            line,
+        )
+        if pm:
+            direction = pm.group(1)
+            width_str = pm.group(2)
+            name = pm.group(3)
+            if width_str:
+                wm = re.match(r"\[(\d+):(\d+)\]", width_str.strip())
+                width = int(wm.group(1)) - int(wm.group(2)) + 1 if wm else 1
+            else:
+                width = 1
+            ports.append({"name": name, "direction": direction, "width": width})
+
+    return {"name": module_name, "ports": ports}
+
+
+def _generate_testbench(verilog: str, prompt: str) -> str:
+    """Ask Ollama to generate a Verilog testbench with VCD dump."""
+
+    info = _extract_module_info(verilog)
+    module_name = info["name"]
+    port_lines = []
+    for p in info["ports"]:
+        w = f"[{p['width']-1}:0] " if p["width"] > 1 else ""
+        port_lines.append(f"  {p['direction']} {w}{p['name']}")
+
+    tb_prompt = f"""Write a Verilog testbench for the following module.
+
+Module name: {module_name}
+Ports:
+{chr(10).join(port_lines)}
+
+Original design intent: {prompt}
+
+Rules:
+1. Module name must be `tb_{module_name}` (no ports).
+2. Declare all inputs as `reg`, all outputs as `wire`.
+3. Instantiate the DUT as `uut`.
+4. Include `$dumpfile("dump.vcd");` and `$dumpvars(0, tb_{module_name});` in an initial block.
+5. Write at least 4 meaningful test cases with $display statements showing input → output.
+6. End with `$finish;`.
+7. Use `#10;` delays between test vectors.
+8. Return ONLY Verilog. Start with `module` and end with `endmodule`. No explanation."""
+
+    raw = call_ollama(tb_prompt)
+    code = raw.strip()
+
+    # Extract clean Verilog
+    if "```" in code:
+        parts = code.split("```")
+        for part in parts[1::2]:
+            lines = part.strip().split("\n")
+            if lines and lines[0].strip().lower() in ("verilog", "v", "sv", ""):
+                part = "\n".join(lines[1:])
+            if "module" in part:
+                code = part.strip()
+                break
+
+    start = code.find("module ")
+    if start != -1:
+        code = code[start:]
+    end = code.rfind("endmodule")
+    if end != -1:
+        code = code[:end + len("endmodule")]
+
+    # Ensure VCD dump is present — inject if missing
+    if "$dumpfile" not in code:
+        inject = (
+            f'\n  initial begin\n'
+            f'    $dumpfile("dump.vcd");\n'
+            f'    $dumpvars(0, tb_{module_name});\n'
+            f'  end\n'
+        )
+        idx = code.find("\n", code.find(module_name))
+        if idx != -1:
+            code = code[:idx+1] + inject + code[idx+1:]
+
+    return code.strip()
+
+
+@app.post("/generate", response_model=GenerateResponse)
+async def generate(req: GenerateRequest):
+    """Generate Verilog design + testbench from a natural language prompt."""
+
+    if not req.prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt is empty")
+
+    try:
+        design = _generate_verilog(req.prompt)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to generate design: {e}. Is Ollama running?",
+        )
+
+    if not design or "module" not in design:
+        raise HTTPException(
+            status_code=502,
+            detail="Ollama returned invalid Verilog. Try rephrasing the prompt.",
+        )
+
+    try:
+        testbench = _generate_testbench(design, req.prompt)
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to generate testbench: {e}",
+        )
+
+    return GenerateResponse(design=design, testbench=testbench)
 
 
 @app.get("/health")
