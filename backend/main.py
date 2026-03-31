@@ -3,14 +3,17 @@ Volta — Backend API
 FastAPI server with POST /simulate and POST /generate endpoints.
 /simulate — compile + simulate Verilog with Icarus Verilog, return VCD as JSON.
 /generate — take a natural-language prompt, generate Verilog + testbench via Ollama.
+             Runs the correction engine (Yosys) to auto-fix errors before returning.
 """
 
 import json
+import logging
 import os
 import re
 import subprocess
 import sys
 import tempfile
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +22,9 @@ from pydantic import BaseModel
 # Make core/ importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 from rtl_generator import call_ollama, extract_verilog
+from correction_engine import correct as correct_verilog, run_yosys
+
+logger = logging.getLogger("volta.backend")
 
 
 app = FastAPI(title="Volta", version="0.1.0")
@@ -251,9 +257,17 @@ class GenerateRequest(BaseModel):
     prompt: str
 
 
+class CorrectionInfo(BaseModel):
+    ran: bool = False
+    passed: bool = False
+    attempts: int = 0
+    errors_fixed: list[str] = []
+
+
 class GenerateResponse(BaseModel):
     design: str
     testbench: str
+    correction: Optional[CorrectionInfo] = None
 
 
 def _generate_verilog(prompt: str) -> str:
@@ -386,13 +400,52 @@ Rules:
     return code.strip()
 
 
+def _verify_compile(design: str, testbench: str) -> tuple[bool, str]:
+    """Quick iverilog compile check for design + testbench together.
+
+    Returns (ok, stderr).
+    """
+
+    with tempfile.TemporaryDirectory(prefix="volta_chk_") as work_dir:
+        d_path = os.path.join(work_dir, "design.v")
+        t_path = os.path.join(work_dir, "testbench.v")
+        out_path = os.path.join(work_dir, "check.out")
+
+        with open(d_path, "w") as f:
+            f.write(design)
+        with open(t_path, "w") as f:
+            f.write(testbench)
+
+        try:
+            r = subprocess.run(
+                ["iverilog", "-o", out_path, d_path, t_path],
+                capture_output=True, text=True, timeout=30,
+            )
+            return r.returncode == 0, r.stderr
+        except FileNotFoundError:
+            # iverilog not installed — skip check
+            return True, ""
+        except subprocess.TimeoutExpired:
+            return False, "iverilog timed out"
+
+
 @app.post("/generate", response_model=GenerateResponse)
 async def generate(req: GenerateRequest):
-    """Generate Verilog design + testbench from a natural language prompt."""
+    """Generate Verilog design + testbench from a natural language prompt.
+
+    Pipeline:
+        1. Generate Verilog from the prompt via Ollama.
+        2. Run the correction engine (Yosys) to detect and auto-fix errors.
+        3. Generate a testbench that matches the *corrected* design.
+        4. Verify the pair compiles with iverilog; regenerate testbench if not.
+    """
 
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is empty")
 
+    # ------------------------------------------------------------------
+    # Step 1: Generate raw Verilog
+    # ------------------------------------------------------------------
     try:
         design = _generate_verilog(req.prompt)
     except Exception as e:
@@ -407,6 +460,54 @@ async def generate(req: GenerateRequest):
             detail="Ollama returned invalid Verilog. Try rephrasing the prompt.",
         )
 
+    logger.info("Raw Verilog generated (%d chars)", len(design))
+
+    # ------------------------------------------------------------------
+    # Step 2: Run correction engine — auto-fix until Yosys passes
+    # ------------------------------------------------------------------
+    correction = CorrectionInfo(ran=False)
+
+    try:
+        synth = run_yosys(design)
+
+        if not synth.success:
+            logger.info(
+                "Yosys found %d error(s) — running correction engine",
+                len(synth.errors),
+            )
+            initial_errors = list(synth.errors)
+            result = correct_verilog(design)
+
+            correction = CorrectionInfo(
+                ran=True,
+                passed=result["passed"],
+                attempts=result["attempts"],
+                errors_fixed=initial_errors,
+            )
+
+            if result["passed"]:
+                design = result["final_code"]
+                logger.info(
+                    "Correction engine fixed the code in %d attempt(s)",
+                    result["attempts"],
+                )
+            else:
+                # Use whatever the engine produced — best effort
+                design = result["final_code"]
+                logger.warning(
+                    "Correction engine could not fully fix the code after %d attempts",
+                    result["attempts"],
+                )
+        else:
+            logger.info("Yosys passed on first try — no correction needed")
+            correction = CorrectionInfo(ran=True, passed=True, attempts=1)
+    except Exception as e:
+        # Yosys/correction failure is non-fatal — still return the raw code
+        logger.warning("Correction engine error (non-fatal): %s", e)
+
+    # ------------------------------------------------------------------
+    # Step 3: Generate testbench from the *corrected* design
+    # ------------------------------------------------------------------
     try:
         testbench = _generate_testbench(design, req.prompt)
     except Exception as e:
@@ -415,7 +516,26 @@ async def generate(req: GenerateRequest):
             detail=f"Failed to generate testbench: {e}",
         )
 
-    return GenerateResponse(design=design, testbench=testbench)
+    # ------------------------------------------------------------------
+    # Step 4: Verify the pair compiles with iverilog — retry testbench once
+    # ------------------------------------------------------------------
+    ok, stderr = _verify_compile(design, testbench)
+    if not ok:
+        logger.info("iverilog compile failed — regenerating testbench")
+        logger.info("iverilog stderr: %s", stderr[:500])
+        try:
+            testbench = _generate_testbench(design, req.prompt)
+            ok2, _ = _verify_compile(design, testbench)
+            if not ok2:
+                logger.warning("Testbench still fails iverilog after retry")
+        except Exception:
+            pass  # keep the best testbench we have
+
+    return GenerateResponse(
+        design=design,
+        testbench=testbench,
+        correction=correction,
+    )
 
 
 @app.get("/health")
