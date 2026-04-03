@@ -63,5 +63,17 @@ export default function EditorPane({ value, onChange }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Sync external value prop into the editor when it changes
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const current = view.state.doc.toString()
+    if (value !== current) {
+      view.dispatch({
+        changes: { from: 0, to: current.length, insert: value },
+      })
+    }
+  }, [value])
+
   return <div ref={containerRef} style={{ height: '100%', overflow: 'hidden' }} />
 }
