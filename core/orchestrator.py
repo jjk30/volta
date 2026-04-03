@@ -3,11 +3,16 @@ Volta — Orchestrator
 Full generate pipeline: prompt → spec → Verilog → correction → testbench → verify.
 
 This is the main entry point for the /generate flow. It coordinates:
-  1. Spec Interpreter — prompt → structured DesignSpec
-  2. RTL Generator   — spec → Verilog (with precise, structured prompt)
-  3. Correction Engine — Yosys verification + auto-fix loop
-  4. Testbench Generation — spec test vectors → Verilog testbench with VCD
-  5. Compilation Check — iverilog to verify design + testbench compile together
+  1. Spec Interpreter   — prompt → structured DesignSpec (with fallback)
+  2. RTL Generator      — spec → Verilog (with precise, structured prompt)
+  3. Post-processing    — auto-fix common LLM Verilog mistakes
+  4. Correction Engine  — Yosys verification + auto-fix loop
+  5. Testbench Gen      — spec test vectors → Verilog testbench with VCD
+  6. Smoke-test Fallback — if testbench fails, generate basic exerciser
+  7. Compilation Check  — iverilog to verify design + testbench compile
+
+If the structured spec approach fails, falls back to direct generation.
+The goal: ANY reasonable hardware prompt produces SOME working output.
 """
 
 import json
@@ -19,20 +24,17 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from schema import DesignSpec, ModuleSpec, PortDirection, SignalType
-from spec_interpreter import interpret
+from spec_interpreter import interpret, _sanitize_identifier, _guess_module_name
 from rtl_generator import call_ollama, extract_verilog
 from correction_engine import correct as correct_verilog, run_yosys
 
 
 # ---------------------------------------------------------------------------
-# Generic Verilog generation prompt (not ALU-specific like rtl_generator's)
+# Generic Verilog generation prompt (spec-driven)
 # ---------------------------------------------------------------------------
 
 def build_generate_prompt(module: ModuleSpec) -> str:
-    """Build a precise Verilog generation prompt from a ModuleSpec.
-
-    Unlike rtl_generator.build_prompt, this is generic — no ALU-specific rules.
-    """
+    """Build a precise Verilog generation prompt from a ModuleSpec."""
 
     port_lines = []
     for p in module.ports:
@@ -87,21 +89,59 @@ Rules:
 4. {reset_rule}
 5. Module name must be exactly: {module.name}
 6. Every signal used must be declared.
+7. Do not use SystemVerilog features. Use standard Verilog-2001.
 
 Return ONLY Verilog. Start with `module` and end with `endmodule`. No explanation."""
+
+
+# ---------------------------------------------------------------------------
+# Direct generation fallback prompt (no spec needed)
+# ---------------------------------------------------------------------------
+
+DIRECT_GENERATE_PROMPT = """You are an expert Verilog designer. Write synthesizable Verilog
+for the following hardware design.
+
+Design request: {prompt}
+
+Rules:
+1. Use `always @(*)` for combinational logic, `always @(posedge clk)` for sequential.
+2. Outputs driven inside always blocks MUST be declared as `output reg` in the port list.
+3. Include a default case in any case statement.
+4. Sequential designs need clk and rst inputs. On rst==1, reset all outputs to 0.
+5. Module name should be a short snake_case identifier.
+6. Every signal used must be declared as wire or reg.
+7. Do not use SystemVerilog features. Use standard Verilog-2001.
+8. Initialize all signals to avoid latches.
+
+Return ONLY Verilog. Start with `module` and end with `endmodule`. No explanation."""
+
+
+SIMPLIFIED_DIRECT_PROMPT = """Write simple Verilog for: {prompt}
+
+Keep it minimal. Use `always @(*)` for combinational or `always @(posedge clk)` for
+sequential. Declare outputs as `output reg` if used in always blocks. Include default
+cases. Start with `module` and end with `endmodule`. No explanation."""
 
 
 # ---------------------------------------------------------------------------
 # Post-processing: fix common LLM Verilog issues
 # ---------------------------------------------------------------------------
 
+def _fix_verilog(verilog: str) -> str:
+    """Apply all post-processing fixes to Verilog code."""
+    code = verilog
+    code = _fix_reg_declarations(code)
+    code = _fix_missing_semicolons(code)
+    code = _fix_undeclared_regs(code)
+    code = _strip_systemverilog(code)
+    return code
+
+
 def _fix_reg_declarations(verilog: str) -> str:
-    """Fix the most common LLM error: outputs used in always blocks but not
-    declared as reg. Detects procedural assignments to outputs and adds 'reg'."""
+    """Fix outputs used in always blocks but not declared as reg."""
 
     lines = verilog.split("\n")
 
-    # Find outputs declared without reg
     output_names = set()
     output_reg_names = set()
     for line in lines:
@@ -114,32 +154,32 @@ def _fix_reg_declarations(verilog: str) -> str:
         if m:
             output_names.add(m.group(1))
 
-    # Check if any non-reg output is used in a procedural assignment
     in_always = False
+    always_depth = 0
     needs_reg = set()
     for line in lines:
         stripped = line.strip()
-        if "always" in stripped:
+        if re.match(r"always\s+@", stripped):
             in_always = True
+            always_depth = 0
         if in_always:
+            always_depth += stripped.count("begin") - stripped.count("end")
             for name in output_names:
-                # Match: name = ... or {name, ...} = ...
-                if re.search(rf'\b{name}\b\s*=', stripped) or \
-                   re.search(rf'\{{\s*{name}\b', stripped):
+                if re.search(rf'\b{re.escape(name)}\b\s*<?=', stripped):
                     needs_reg.add(name)
-        if stripped in ("end", "endmodule"):
-            in_always = False
+                if re.search(rf'\{{\s*{re.escape(name)}\b', stripped):
+                    needs_reg.add(name)
+            if always_depth <= 0 and "end" in stripped:
+                in_always = False
 
     if not needs_reg:
         return verilog
 
-    # Add 'reg' to those output declarations
     new_lines = []
     for line in lines:
-        stripped = line.strip().rstrip(",").rstrip(");")
         for name in needs_reg:
-            m = re.match(r"(\s*output\s+)(\[[\d:]+\]\s+)?" + re.escape(name) + r"\b", line.rstrip(",").rstrip(");"))
-            if m and "reg" not in line:
+            pattern = r"(\s*output\s+)(\[[\d:]+\]\s+)?" + re.escape(name) + r"\b"
+            if re.match(pattern, line.rstrip(",").rstrip(");")) and "reg" not in line:
                 line = line.replace("output ", "output reg ", 1)
                 break
         new_lines.append(line)
@@ -147,126 +187,107 @@ def _fix_reg_declarations(verilog: str) -> str:
     return "\n".join(new_lines)
 
 
-# ---------------------------------------------------------------------------
-# Verilog testbench generator (from spec test vectors)
-# ---------------------------------------------------------------------------
+def _fix_missing_semicolons(verilog: str) -> str:
+    """Fix missing semicolons after common statements."""
 
-def generate_verilog_testbench(spec: DesignSpec, design_code: str) -> str:
-    """Generate a Verilog testbench from a DesignSpec's test vectors.
+    lines = verilog.split("\n")
+    new_lines = []
 
-    Produces a self-contained testbench with $dumpfile/$dumpvars for waveforms.
-    Each test vector becomes a block of stimulus + check via $display.
-    """
+    for i, line in enumerate(lines):
+        stripped = line.rstrip()
+        trimmed = stripped.strip()
 
-    module = spec.modules[0]
-    module_name = module.name
+        # Skip empty lines, comments, begin/end, module/endmodule, directives
+        if not trimmed or trimmed.startswith("//") or trimmed.startswith("`"):
+            new_lines.append(line)
+            continue
+        if trimmed in ("begin", "end", "endmodule", "endcase", "endfunction",
+                       "endtask", "else", "else begin"):
+            new_lines.append(line)
+            continue
+        if trimmed.startswith(("module ", "always ", "if ", "else ", "for ",
+                               "case ", "case(", "default", "input ", "output ",
+                               "wire ", "reg ", "assign ", "initial ",
+                               "function ", "task ")):
+            new_lines.append(line)
+            continue
 
-    # Parse actual ports from the generated Verilog (more reliable than spec alone)
-    actual_ports = _parse_ports_from_verilog(design_code)
-    if actual_ports:
-        input_ports = [p for p in actual_ports if p["direction"] == "input"]
-        output_ports = [p for p in actual_ports if p["direction"] == "output"]
-    else:
-        input_ports = [{"name": p.name, "width": p.width}
-                       for p in module.ports if p.direction == PortDirection.INPUT]
-        output_ports = [{"name": p.name, "width": p.width}
-                        for p in module.ports if p.direction == PortDirection.OUTPUT]
+        # Lines that should end with ; but don't
+        # Assignments: foo = bar, foo <= bar
+        if re.match(r".*\b\w+\s*<?=\s*.+[^;,\s]$", trimmed):
+            if not trimmed.endswith(("begin", "end", ";")):
+                line = stripped + ";"
+        new_lines.append(line)
 
-    has_clock = any(p.is_clock for p in module.ports)
-    has_reset = any(p.is_reset for p in module.ports)
+    return "\n".join(new_lines)
 
-    # Cross-check: only emit clock/reset if the actual Verilog has those ports
-    actual_port_names = {p["name"] for p in (actual_ports or [])}
-    if actual_port_names:
-        has_clock = has_clock and any(
-            n in actual_port_names for n in ("clk", "clock")
-        )
-        has_reset = has_reset and any(
-            n in actual_port_names for n in ("rst", "reset", "rstn", "rst_n")
-        )
 
-    lines = []
-    lines.append(f"module tb_{module_name};")
-    lines.append("")
+def _fix_undeclared_regs(verilog: str) -> str:
+    """Detect signals assigned in always blocks that aren't declared,
+    and add reg declarations for them."""
 
-    # Declare regs for inputs, wires for outputs
-    for p in input_ports:
-        w = f"[{p['width']-1}:0] " if p["width"] > 1 else ""
-        lines.append(f"  reg {w}{p['name']};")
-    for p in output_ports:
-        w = f"[{p['width']-1}:0] " if p["width"] > 1 else ""
-        lines.append(f"  wire {w}{p['name']};")
+    lines = verilog.split("\n")
 
-    lines.append("")
+    # Collect all declared signals
+    declared = set()
+    for line in lines:
+        stripped = line.strip().rstrip(",").rstrip(");")
+        for pattern in [
+            r"(?:input|output)\s+(?:reg\s+)?(?:wire\s+)?(?:\[[\d:]+\]\s+)?(\w+)",
+            r"(?:wire|reg)\s+(?:\[[\d:]+\]\s+)?(\w+)",
+        ]:
+            m = re.match(pattern, stripped)
+            if m:
+                declared.add(m.group(1))
 
-    # Instantiate DUT
-    port_connections = []
-    for p in input_ports + output_ports:
-        port_connections.append(f".{p['name']}({p['name']})")
+    # Find signals assigned in always blocks that aren't declared
+    in_always = False
+    undeclared = set()
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r"always\s+@", stripped):
+            in_always = True
+        if in_always:
+            m = re.match(r"\s*(\w+)\s*<?=", stripped)
+            if m:
+                sig = m.group(1)
+                if sig not in declared and sig not in ("if", "else", "case",
+                                                        "begin", "end", "default"):
+                    undeclared.add(sig)
+        if stripped == "endmodule":
+            in_always = False
 
-    lines.append(f"  {module_name} uut(")
-    lines.append(f"    {', '.join(port_connections)}")
-    lines.append(f"  );")
-    lines.append("")
+    if not undeclared:
+        return verilog
 
-    # Clock generation if sequential
-    if has_clock:
-        lines.append("  initial clk = 0;")
-        lines.append("  always #5 clk = ~clk;")
-        lines.append("")
+    # Insert reg declarations after the port list
+    insert_idx = None
+    for i, line in enumerate(lines):
+        if ");" in line.strip():
+            insert_idx = i + 1
+            break
 
-    # VCD dump + test vectors
-    lines.append("  initial begin")
-    lines.append(f'    $dumpfile("dump.vcd");')
-    lines.append(f'    $dumpvars(0, tb_{module_name});')
-    lines.append("")
-
-    # Reset sequence if applicable
-    if has_reset:
-        lines.append("    // Reset")
-        lines.append("    rst = 1;")
-        lines.append("    #20;")
-        lines.append("    rst = 0;")
-        lines.append("    #10;")
-        lines.append("")
-
-    # Collect valid port names for filtering test vectors
-    all_port_names = {p["name"] for p in input_ports + output_ports}
-    input_port_names = {p["name"] for p in input_ports}
-    output_port_names = {p["name"] for p in output_ports}
-
-    # Test vectors
-    for tv in module.test_vectors:
-        lines.append(f"    // {tv.description}")
-        for port_name, value in tv.inputs.items():
-            # Skip clock in test vector assignments, skip unknown ports
-            if port_name in ("clk",):
-                continue
-            if port_name not in input_port_names:
-                continue
-            lines.append(f"    {port_name} = {value};")
-        lines.append("    #10;")
-
-        # Display results — only reference actual output ports
-        valid_outputs = {k: v for k, v in tv.expected_outputs.items()
-                         if k in output_port_names}
-        if valid_outputs:
-            display_parts = [f"{tv.name}: "]
-            for port_name in valid_outputs:
-                display_parts.append(f"{port_name}=%0d")
-            fmt_str = " ".join(display_parts)
-            args = ", ".join(valid_outputs.keys())
-            lines.append(f'    $display("{fmt_str}", {args});')
-        lines.append("")
-
-    lines.append("    #10;")
-    lines.append("    $finish;")
-    lines.append("  end")
-    lines.append("")
-    lines.append("endmodule")
+    if insert_idx is not None:
+        decls = [f"  reg {sig};" for sig in sorted(undeclared)]
+        lines = lines[:insert_idx] + [""] + decls + lines[insert_idx:]
 
     return "\n".join(lines)
 
+
+def _strip_systemverilog(verilog: str) -> str:
+    """Remove common SystemVerilog constructs that Yosys/iverilog reject."""
+
+    # Replace logic with reg/wire
+    verilog = re.sub(r'\blogic\b', 'reg', verilog)
+    # Remove always_comb / always_ff and convert to always @
+    verilog = re.sub(r'always_comb\b', 'always @(*)', verilog)
+    verilog = re.sub(r'always_ff\s+@', 'always @', verilog)
+    return verilog
+
+
+# ---------------------------------------------------------------------------
+# Parse module info from Verilog source
+# ---------------------------------------------------------------------------
 
 def _parse_ports_from_verilog(verilog: str) -> list[dict]:
     """Parse port declarations from Verilog source."""
@@ -289,6 +310,242 @@ def _parse_ports_from_verilog(verilog: str) -> list[dict]:
                 width = 1
             ports.append({"name": name, "direction": direction, "width": width})
     return ports
+
+
+def _parse_module_name(verilog: str) -> str:
+    """Extract module name from Verilog source."""
+    m = re.match(r"module\s+(\w+)", verilog)
+    return m.group(1) if m else "top"
+
+
+# ---------------------------------------------------------------------------
+# Verilog testbench generator (from spec test vectors)
+# ---------------------------------------------------------------------------
+
+def generate_verilog_testbench(spec: DesignSpec, design_code: str) -> str:
+    """Generate a Verilog testbench from a DesignSpec's test vectors."""
+
+    module = spec.modules[0]
+    module_name = _parse_module_name(design_code) or module.name
+
+    actual_ports = _parse_ports_from_verilog(design_code)
+    if actual_ports:
+        input_ports = [p for p in actual_ports if p["direction"] == "input"]
+        output_ports = [p for p in actual_ports if p["direction"] == "output"]
+    else:
+        input_ports = [{"name": p.name, "width": p.width}
+                       for p in module.ports if p.direction == PortDirection.INPUT]
+        output_ports = [{"name": p.name, "width": p.width}
+                        for p in module.ports if p.direction == PortDirection.OUTPUT]
+
+    actual_port_names = {p["name"] for p in (actual_ports or [])}
+    input_port_names = {p["name"] for p in input_ports}
+    output_port_names = {p["name"] for p in output_ports}
+
+    has_clock = any(p.is_clock for p in module.ports)
+    has_reset = any(p.is_reset for p in module.ports)
+
+    # Cross-check against actual Verilog ports
+    if actual_port_names:
+        has_clock = has_clock and any(
+            n in actual_port_names for n in ("clk", "clock")
+        )
+        has_reset = has_reset and any(
+            n in actual_port_names for n in ("rst", "reset", "rstn", "rst_n")
+        )
+
+    lines = []
+    lines.append(f"module tb_{module_name};")
+    lines.append("")
+
+    for p in input_ports:
+        w = f"[{p['width']-1}:0] " if p["width"] > 1 else ""
+        lines.append(f"  reg {w}{p['name']};")
+    for p in output_ports:
+        w = f"[{p['width']-1}:0] " if p["width"] > 1 else ""
+        lines.append(f"  wire {w}{p['name']};")
+
+    lines.append("")
+
+    port_connections = []
+    for p in input_ports + output_ports:
+        port_connections.append(f".{p['name']}({p['name']})")
+
+    lines.append(f"  {module_name} uut(")
+    lines.append(f"    {', '.join(port_connections)}")
+    lines.append(f"  );")
+    lines.append("")
+
+    if has_clock:
+        lines.append("  initial clk = 0;")
+        lines.append("  always #5 clk = ~clk;")
+        lines.append("")
+
+    lines.append("  initial begin")
+    lines.append(f'    $dumpfile("dump.vcd");')
+    lines.append(f'    $dumpvars(0, tb_{module_name});')
+    lines.append("")
+
+    if has_reset:
+        rst_name = "rst"
+        for n in ("rst", "reset", "rstn", "rst_n"):
+            if n in input_port_names:
+                rst_name = n
+                break
+        lines.append("    // Reset")
+        lines.append(f"    {rst_name} = 1;")
+        lines.append("    #20;")
+        lines.append(f"    {rst_name} = 0;")
+        lines.append("    #10;")
+        lines.append("")
+
+    # Test vectors — only reference actual ports
+    for tv in module.test_vectors:
+        lines.append(f"    // {tv.description}")
+        for port_name, value in tv.inputs.items():
+            if port_name in ("clk",):
+                continue
+            if port_name not in input_port_names:
+                continue
+            lines.append(f"    {port_name} = {value};")
+        lines.append("    #10;")
+
+        valid_outputs = {k: v for k, v in tv.expected_outputs.items()
+                         if k in output_port_names}
+        if valid_outputs:
+            display_parts = [f"{tv.name}: "]
+            for port_name in valid_outputs:
+                display_parts.append(f"{port_name}=%0d")
+            fmt_str = " ".join(display_parts)
+            args = ", ".join(valid_outputs.keys())
+            lines.append(f'    $display("{fmt_str}", {args});')
+        lines.append("")
+
+    lines.append("    #10;")
+    lines.append("    $finish;")
+    lines.append("  end")
+    lines.append("")
+    lines.append("endmodule")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Smoke-test testbench fallback
+# ---------------------------------------------------------------------------
+
+def generate_smoke_testbench(design_code: str) -> str:
+    """Generate a basic smoke-test testbench from Verilog source code.
+
+    This is the last-resort fallback. It instantiates the module, toggles
+    clock, applies reset, drives pseudo-random inputs, and includes
+    $dumpfile/$dumpvars so the user always gets waveforms.
+    """
+
+    module_name = _parse_module_name(design_code)
+    ports = _parse_ports_from_verilog(design_code)
+
+    if not ports:
+        # Can't even parse ports — return a minimal stub
+        return f"""module tb_{module_name};
+  initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars(0, tb_{module_name});
+    #100;
+    $finish;
+  end
+endmodule"""
+
+    input_ports = [p for p in ports if p["direction"] == "input"]
+    output_ports = [p for p in ports if p["direction"] == "output"]
+    input_names = {p["name"] for p in input_ports}
+
+    has_clock = any(n in input_names for n in ("clk", "clock"))
+    has_reset = any(n in input_names for n in ("rst", "reset", "rstn", "rst_n"))
+
+    # Determine clock/reset names
+    clk_name = next((n for n in ("clk", "clock") if n in input_names), None)
+    rst_name = next((n for n in ("rst", "reset", "rstn", "rst_n") if n in input_names), None)
+
+    # Data inputs (not clock, not reset)
+    data_inputs = [p for p in input_ports
+                   if p["name"] not in (clk_name, rst_name)]
+
+    lines = []
+    lines.append(f"module tb_{module_name};")
+    lines.append("")
+
+    for p in input_ports:
+        w = f"[{p['width']-1}:0] " if p["width"] > 1 else ""
+        lines.append(f"  reg {w}{p['name']};")
+    for p in output_ports:
+        w = f"[{p['width']-1}:0] " if p["width"] > 1 else ""
+        lines.append(f"  wire {w}{p['name']};")
+
+    lines.append("")
+
+    port_connections = [f".{p['name']}({p['name']})" for p in ports]
+    lines.append(f"  {module_name} uut(")
+    lines.append(f"    {', '.join(port_connections)}")
+    lines.append(f"  );")
+    lines.append("")
+
+    if has_clock and clk_name:
+        lines.append(f"  initial {clk_name} = 0;")
+        lines.append(f"  always #5 {clk_name} = ~{clk_name};")
+        lines.append("")
+
+    lines.append("  integer i;")
+    lines.append("")
+    lines.append("  initial begin")
+    lines.append(f'    $dumpfile("dump.vcd");')
+    lines.append(f'    $dumpvars(0, tb_{module_name});')
+    lines.append("")
+
+    # Initialize all inputs to 0
+    for p in input_ports:
+        lines.append(f"    {p['name']} = 0;")
+    lines.append("")
+
+    # Reset sequence
+    if has_reset and rst_name:
+        lines.append(f"    // Reset")
+        lines.append(f"    {rst_name} = 1;")
+        lines.append(f"    #20;")
+        lines.append(f"    {rst_name} = 0;")
+        lines.append(f"    #10;")
+        lines.append("")
+
+    # Drive data inputs with incrementing values
+    if data_inputs:
+        lines.append("    // Smoke test: drive inputs with incrementing values")
+        lines.append("    for (i = 0; i < 16; i = i + 1) begin")
+        for p in data_inputs:
+            mask = (1 << p["width"]) - 1
+            lines.append(f"      {p['name']} = i & {p['width']}'d{mask};")
+        lines.append("      #10;")
+
+        # Display outputs
+        display_parts = [f"i=%0d"]
+        display_args = ["i"]
+        for p in output_ports:
+            display_parts.append(f"{p['name']}=%0d")
+            display_args.append(p["name"])
+        fmt = " ".join(display_parts)
+        args = ", ".join(display_args)
+        lines.append(f'      $display("{fmt}", {args});')
+        lines.append("    end")
+    else:
+        lines.append("    #200;")
+
+    lines.append("")
+    lines.append("    #20;")
+    lines.append("    $finish;")
+    lines.append("  end")
+    lines.append("")
+    lines.append("endmodule")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -315,9 +572,37 @@ def verify_compile(design: str, testbench: str) -> tuple[bool, str]:
             )
             return r.returncode == 0, r.stderr
         except FileNotFoundError:
-            return True, ""  # iverilog not installed — skip
+            return True, ""
         except subprocess.TimeoutExpired:
             return False, "iverilog timed out"
+
+
+# ---------------------------------------------------------------------------
+# Direct generation fallback (no spec)
+# ---------------------------------------------------------------------------
+
+def _direct_generate(prompt: str, model: str = "codellama:7b") -> str:
+    """Generate Verilog directly from a prompt, without a spec.
+
+    Used as fallback when spec interpretation fails.
+    """
+
+    print(f"\n  [Fallback] Direct generation from prompt...")
+    filled = DIRECT_GENERATE_PROMPT.format(prompt=prompt)
+    raw = call_ollama(filled, model=model)
+    code = extract_verilog(raw, "")
+
+    if not code or "module" not in code:
+        # Try simplified prompt
+        print(f"  [Fallback] Trying simplified prompt...")
+        filled = SIMPLIFIED_DIRECT_PROMPT.format(prompt=prompt)
+        raw = call_ollama(filled, model=model)
+        code = extract_verilog(raw, "")
+
+    if code and "module" in code:
+        code = _fix_verilog(code)
+
+    return code
 
 
 # ---------------------------------------------------------------------------
@@ -327,18 +612,18 @@ def verify_compile(design: str, testbench: str) -> tuple[bool, str]:
 def generate(prompt: str, model: str = "codellama:7b") -> dict:
     """Full generate pipeline: prompt → spec → Verilog → correction → testbench.
 
+    Falls back to direct generation if spec interpretation fails.
+    Falls back to smoke-test testbench if spec-based testbench fails.
+    The goal: always produce SOME working output.
+
     Returns:
         {
-            "design": str,           # Final corrected Verilog
-            "testbench": str,        # Verilog testbench with VCD dump
-            "spec": DesignSpec,      # Structured spec used for generation
-            "correction": {
-                "ran": bool,
-                "passed": bool,
-                "attempts": int,
-                "errors_fixed": list[str],
-            },
-            "compile_ok": bool,      # Whether iverilog compile passed
+            "design": str,
+            "testbench": str,
+            "spec": DesignSpec | None,
+            "correction": { "ran": bool, "passed": bool, "attempts": int, "errors_fixed": list },
+            "compile_ok": bool,
+            "fallback_used": str | None,
         }
     """
 
@@ -347,32 +632,49 @@ def generate(prompt: str, model: str = "codellama:7b") -> dict:
     print(f"{'=' * 60}")
     print(f"  Prompt: {prompt}")
 
-    # ------------------------------------------------------------------
-    # Step 1: Interpret prompt into structured spec
-    # ------------------------------------------------------------------
-    print(f"\n  Step 1: Interpreting prompt → structured spec...")
-    spec = interpret(prompt, model=model)
-    module = spec.modules[0]
-    print(f"  ✓ Spec: {module.name} | {len(module.ports)} ports | "
-          f"{len(module.operations)} ops | {len(module.test_vectors)} tests")
+    spec = None
+    design = None
+    fallback_used = None
 
     # ------------------------------------------------------------------
-    # Step 2: Build precise Verilog prompt from spec and generate
+    # Step 1: Try spec-driven generation
     # ------------------------------------------------------------------
-    print(f"\n  Step 2: Generating Verilog from structured spec...")
-    verilog_prompt = build_generate_prompt(module)
-    print(f"  Prompt length: {len(verilog_prompt)} chars")
+    try:
+        print(f"\n  Step 1: Interpreting prompt → structured spec...")
+        spec = interpret(prompt, model=model)
+        module = spec.modules[0]
+        print(f"  ✓ Spec: {module.name} | {len(module.ports)} ports | "
+              f"{len(module.operations)} ops | {len(module.test_vectors)} tests")
 
-    raw = call_ollama(verilog_prompt, model=model)
-    design = extract_verilog(raw, module.name)
+        print(f"\n  Step 2: Generating Verilog from structured spec...")
+        verilog_prompt = build_generate_prompt(module)
+        raw = call_ollama(verilog_prompt, model=model)
+        design = extract_verilog(raw, module.name)
 
+        if design and "module" in design:
+            design = _fix_verilog(design)
+            print(f"  ✓ Generated {len(design)} chars of Verilog")
+        else:
+            print(f"  ⚠ Spec-based generation returned invalid Verilog")
+            design = None
+
+    except Exception as e:
+        print(f"  ⚠ Spec-driven pipeline failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Step 2b: Fallback to direct generation if spec approach failed
+    # ------------------------------------------------------------------
     if not design or "module" not in design:
-        raise RuntimeError("LLM returned invalid Verilog from structured prompt")
-
-    # Post-process: fix common LLM mistakes
-    design = _fix_reg_declarations(design)
-
-    print(f"  ✓ Generated {len(design)} chars of Verilog")
+        print(f"\n  Step 2b: Falling back to direct generation...")
+        fallback_used = "direct_generation"
+        try:
+            design = _direct_generate(prompt, model=model)
+            if design and "module" in design:
+                print(f"  ✓ Direct generation produced {len(design)} chars")
+            else:
+                raise RuntimeError("Direct generation returned invalid Verilog")
+        except Exception as e:
+            raise RuntimeError(f"All generation approaches failed: {e}")
 
     # ------------------------------------------------------------------
     # Step 3: Run correction engine (Yosys verify + auto-fix)
@@ -404,18 +706,67 @@ def generate(prompt: str, model: str = "codellama:7b") -> dict:
             else:
                 design = result["final_code"]
                 print(f"  ⚠ Could not fully fix after {result['attempts']} attempts")
+
+                # Last resort: try once more from scratch with simplified prompt
+                if fallback_used != "direct_generation":
+                    print(f"  ⚠ Trying fresh generation from scratch...")
+                    try:
+                        fresh = _direct_generate(prompt, model=model)
+                        if fresh and "module" in fresh:
+                            fresh = _fix_verilog(fresh)
+                            synth2 = run_yosys(fresh)
+                            if synth2.success:
+                                design = fresh
+                                correction["passed"] = True
+                                fallback_used = "regenerated_from_scratch"
+                                print(f"  ✓ Fresh generation passed Yosys")
+                    except Exception:
+                        pass
     except Exception as e:
         print(f"  ⚠ Correction engine error (non-fatal): {e}")
 
     # ------------------------------------------------------------------
-    # Step 4: Generate Verilog testbench from spec's test vectors
+    # Step 4: Generate testbench
     # ------------------------------------------------------------------
-    print(f"\n  Step 4: Generating Verilog testbench...")
-    testbench = generate_verilog_testbench(spec, design)
-    print(f"  ✓ Generated testbench ({len(testbench)} chars)")
+    print(f"\n  Step 4: Generating testbench...")
+    testbench = None
+
+    # Try spec-based testbench first (if we have a spec with test vectors)
+    if spec and spec.modules[0].test_vectors:
+        try:
+            testbench = generate_verilog_testbench(spec, design)
+            ok, stderr = verify_compile(design, testbench)
+            if ok:
+                print(f"  ✓ Spec-based testbench ({len(testbench)} chars)")
+            else:
+                print(f"  ⚠ Spec-based testbench failed iverilog: {stderr[:150]}")
+                testbench = None
+        except Exception as e:
+            print(f"  ⚠ Spec-based testbench generation failed: {e}")
+            testbench = None
+
+    # Fallback: smoke-test testbench
+    if testbench is None:
+        print(f"  Falling back to smoke-test testbench...")
+        fallback_used = fallback_used or "smoke_testbench"
+        try:
+            testbench = generate_smoke_testbench(design)
+            print(f"  ✓ Smoke-test testbench ({len(testbench)} chars)")
+        except Exception as e:
+            print(f"  ⚠ Smoke-test generation failed: {e}")
+            # Absolute last resort — minimal testbench
+            module_name = _parse_module_name(design)
+            testbench = f"""module tb_{module_name};
+  initial begin
+    $dumpfile("dump.vcd");
+    $dumpvars(0, tb_{module_name});
+    #100;
+    $finish;
+  end
+endmodule"""
 
     # ------------------------------------------------------------------
-    # Step 5: Verify design + testbench compile with iverilog
+    # Step 5: Verify compilation
     # ------------------------------------------------------------------
     print(f"\n  Step 5: Verifying compilation with iverilog...")
     compile_ok, stderr = verify_compile(design, testbench)
@@ -424,14 +775,16 @@ def generate(prompt: str, model: str = "codellama:7b") -> dict:
         print(f"  ✓ iverilog compile passed")
     else:
         print(f"  ⚠ iverilog compile failed: {stderr[:200]}")
-        # Try regenerating testbench from design ports (fallback)
-        print(f"  Regenerating testbench from actual Verilog ports...")
-        testbench = generate_verilog_testbench(spec, design)
-        compile_ok, stderr = verify_compile(design, testbench)
-        if compile_ok:
-            print(f"  ✓ Retry succeeded")
-        else:
-            print(f"  ⚠ Still failing — returning best effort")
+        # Try smoke-test as final fallback
+        if "smoke" not in (fallback_used or ""):
+            print(f"  Trying smoke-test testbench...")
+            testbench = generate_smoke_testbench(design)
+            compile_ok, stderr = verify_compile(design, testbench)
+            if compile_ok:
+                print(f"  ✓ Smoke-test compile passed")
+                fallback_used = fallback_used or "smoke_testbench"
+            else:
+                print(f"  ⚠ Still failing — returning best effort")
 
     # ------------------------------------------------------------------
     # Done
@@ -444,6 +797,8 @@ def generate(prompt: str, model: str = "codellama:7b") -> dict:
     print(f"  Correction: {'PASS' if correction.get('passed') else 'FAIL'} "
           f"({correction.get('attempts', 0)} attempt(s))")
     print(f"  Compile: {'PASS' if compile_ok else 'FAIL'}")
+    if fallback_used:
+        print(f"  Fallback: {fallback_used}")
 
     return {
         "design": design,
@@ -451,11 +806,12 @@ def generate(prompt: str, model: str = "codellama:7b") -> dict:
         "spec": spec,
         "correction": correction,
         "compile_ok": compile_ok,
+        "fallback_used": fallback_used,
     }
 
 
 # ---------------------------------------------------------------------------
-# main — test with three prompts
+# main — test with diverse prompts
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -463,6 +819,8 @@ if __name__ == "__main__":
         "Design a 4-bit counter with reset and enable",
         "Design an 8-bit shift register",
         "Design a 2-to-1 multiplexer",
+        "Design a UART transmitter with 8-bit data, start bit, and stop bit",
+        "Design a simple RISC-V ALU with add, sub, and, or, xor, sll, srl, sra",
     ]
 
     results = {}
@@ -473,6 +831,7 @@ if __name__ == "__main__":
                 "passed": result["correction"].get("passed", False),
                 "compile_ok": result["compile_ok"],
                 "design_len": len(result["design"]),
+                "fallback": result.get("fallback_used"),
             }
         except Exception as e:
             print(f"\n  ✗ FAILED: {e}")
@@ -480,12 +839,13 @@ if __name__ == "__main__":
 
     # Summary
     print(f"\n\n{'=' * 60}")
-    print(f"  SUMMARY — All 3 Prompts")
+    print(f"  SUMMARY — All Prompts")
     print(f"{'=' * 60}")
     for prompt, info in results.items():
         yosys = "PASS" if info.get("passed") else "FAIL"
         iverilog = "PASS" if info.get("compile_ok") else "FAIL"
+        fb = f" (fallback: {info['fallback']})" if info.get("fallback") else ""
         print(f"\n  \"{prompt}\"")
-        print(f"    Yosys: {yosys} | iverilog: {iverilog}")
+        print(f"    Yosys: {yosys} | iverilog: {iverilog}{fb}")
         if "error" in info:
             print(f"    Error: {info['error']}")
