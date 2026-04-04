@@ -136,7 +136,7 @@ function App() {
     const startHeight = waveformHeight
 
     const onMouseMove = (e) => {
-      const delta = e.clientY - startY
+      const delta = startY - e.clientY
       const maxH = window.innerHeight * 0.6
       setWaveformHeight(Math.max(100, Math.min(maxH, startHeight + delta)))
     }
