@@ -17,6 +17,7 @@ function App() {
   const [error, setError] = useState(null)
   const [splitPos, setSplitPos] = useState(50)
   const [consoleOpen, setConsoleOpen] = useState(true)
+  const [consoleHeight, setConsoleHeight] = useState(100)
 
   const handleSimulate = useCallback(async () => {
     setSimulating(true)
@@ -88,6 +89,24 @@ function App() {
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
   }, [])
+
+  const handleConsoleResizeDown = useCallback((e) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startHeight = consoleHeight
+
+    const onMouseMove = (e) => {
+      const delta = startY - e.clientY
+      const maxH = window.innerHeight * 0.5
+      setConsoleHeight(Math.max(60, Math.min(maxH, startHeight + delta)))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [consoleHeight])
 
   const hasConsoleOutput = simResult && (simResult.stdout || simResult.stderr)
 
@@ -173,12 +192,27 @@ function App() {
         </div>
       </div>
 
-      {/* Collapsible console output */}
+      {/* Collapsible, resizable console output */}
       {hasConsoleOutput && (
         <div style={{
-          borderTop: '1px solid var(--border)',
           background: '#000',
+          flexShrink: 0,
         }}>
+          {/* Drag handle for resizing */}
+          {consoleOpen && (
+            <div
+              onMouseDown={handleConsoleResizeDown}
+              style={{
+                height: '4px',
+                cursor: 'row-resize',
+                background: 'var(--border)',
+                flexShrink: 0,
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
+              onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
+            />
+          )}
           <div
             onClick={() => setConsoleOpen(!consoleOpen)}
             style={{
@@ -189,6 +223,7 @@ function App() {
               fontFamily: "'JetBrains Mono', monospace",
               background: 'var(--toolbar-bg)',
               borderBottom: consoleOpen ? '1px solid var(--border)' : 'none',
+              borderTop: consoleOpen ? 'none' : '1px solid var(--border)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -207,7 +242,7 @@ function App() {
           </div>
           {consoleOpen && (
             <div style={{
-              height: '80px',
+              height: `${consoleHeight}px`,
               overflow: 'auto',
               padding: '6px 12px',
               fontSize: '11px',
