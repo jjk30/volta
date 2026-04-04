@@ -1,8 +1,8 @@
 import { useRef, useEffect } from 'react'
 
 const COLORS = [
-  '#89b4fa', '#a6e3a1', '#f9e2af', '#f38ba8',
-  '#cba6f7', '#74c7ec', '#fab387', '#94e2d5',
+  '#00ff41', '#00cc33', '#4ec9b0', '#d4a017',
+  '#9d7cd8', '#6a9955', '#c75050', '#888888',
 ]
 
 const LABEL_WIDTH = 120
@@ -11,6 +11,10 @@ const PADDING_TOP = 30
 const PADDING_RIGHT = 20
 const BIT_HEIGHT = 22
 const BUS_HEIGHT = 22
+
+// Grid spacing for oscilloscope-style background
+const GRID_MAJOR = 80
+const GRID_MINOR = 20
 
 export default function WaveformViewer({ signals, endTime }) {
   const canvasRef = useRef(null)
@@ -32,15 +36,48 @@ export default function WaveformViewer({ signals, endTime }) {
     const ctx = canvas.getContext('2d')
     ctx.scale(dpr, dpr)
 
-    // Background
-    ctx.fillStyle = '#11111b'
+    // Pure black background
+    ctx.fillStyle = '#000000'
     ctx.fillRect(0, 0, width, height)
+
+    // Oscilloscope grid — subtle green lines
+    // Minor grid
+    ctx.strokeStyle = '#0a1a0a'
+    ctx.lineWidth = 0.5
+    for (let x = LABEL_WIDTH; x < width; x += GRID_MINOR) {
+      ctx.beginPath()
+      ctx.moveTo(x, 0)
+      ctx.lineTo(x, height)
+      ctx.stroke()
+    }
+    for (let y = PADDING_TOP; y < height; y += GRID_MINOR) {
+      ctx.beginPath()
+      ctx.moveTo(LABEL_WIDTH, y)
+      ctx.lineTo(width, y)
+      ctx.stroke()
+    }
+
+    // Major grid
+    ctx.strokeStyle = '#0d2a0d'
+    ctx.lineWidth = 0.5
+    for (let x = LABEL_WIDTH; x < width; x += GRID_MAJOR) {
+      ctx.beginPath()
+      ctx.moveTo(x, 0)
+      ctx.lineTo(x, height)
+      ctx.stroke()
+    }
+    for (let y = PADDING_TOP; y < height; y += GRID_MAJOR) {
+      ctx.beginPath()
+      ctx.moveTo(LABEL_WIDTH, y)
+      ctx.lineTo(width, y)
+      ctx.stroke()
+    }
 
     const traceWidth = width - LABEL_WIDTH - PADDING_RIGHT
     const tMax = endTime || 1
 
     // Time axis
-    ctx.strokeStyle = '#313244'
+    ctx.strokeStyle = '#1a3a1a'
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(LABEL_WIDTH, PADDING_TOP - 5)
@@ -48,7 +85,7 @@ export default function WaveformViewer({ signals, endTime }) {
     ctx.stroke()
 
     // Time labels
-    ctx.fillStyle = '#6c7086'
+    ctx.fillStyle = '#00ff4160'
     ctx.font = '10px "JetBrains Mono", monospace'
     ctx.textAlign = 'center'
     const nTicks = Math.min(10, Math.max(4, Math.floor(traceWidth / 80)))
@@ -56,12 +93,6 @@ export default function WaveformViewer({ signals, endTime }) {
       const t = Math.round((i / nTicks) * tMax)
       const x = LABEL_WIDTH + (i / nTicks) * traceWidth
       ctx.fillText(`${t}`, x, PADDING_TOP - 10)
-
-      ctx.strokeStyle = '#1e1e2e'
-      ctx.beginPath()
-      ctx.moveTo(x, PADDING_TOP)
-      ctx.lineTo(x, height)
-      ctx.stroke()
     }
 
     // Draw each signal
@@ -71,13 +102,13 @@ export default function WaveformViewer({ signals, endTime }) {
       const midY = y + ROW_HEIGHT / 2
 
       // Label
-      ctx.fillStyle = '#a6adc8'
+      ctx.fillStyle = '#00ff4190'
       ctx.font = '11px "JetBrains Mono", monospace'
       ctx.textAlign = 'right'
       ctx.fillText(sig.name, LABEL_WIDTH - 10, midY + 4)
 
       // Separator line
-      ctx.strokeStyle = '#1e1e2e'
+      ctx.strokeStyle = '#0d1a0d'
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(LABEL_WIDTH, y + ROW_HEIGHT)
@@ -105,25 +136,22 @@ export default function WaveformViewer({ signals, endTime }) {
           const nextX = timeToX(nextT)
 
           if (i === 0 && t > 0) {
-            // Draw from start
             const startY = lowY
             ctx.moveTo(LABEL_WIDTH, startY)
             ctx.lineTo(x, startY)
           }
 
-          // Transition
           if (i > 0) {
             ctx.lineTo(x, yPos)
           } else {
             ctx.moveTo(x, yPos)
           }
 
-          // Hold
           ctx.lineTo(nextX, yPos)
         }
         ctx.stroke()
       } else {
-        // Multi-bit bus: draw as filled boxes with hex values
+        // Multi-bit bus: diamond boxes with hex values
         for (let i = 0; i < sig.values.length; i++) {
           const [t, val] = sig.values[i]
           const x = timeToX(t)
@@ -134,8 +162,8 @@ export default function WaveformViewer({ signals, endTime }) {
           const topY = midY - BUS_HEIGHT / 2
           const botY = midY + BUS_HEIGHT / 2
 
-          // Bus diamond transitions
-          ctx.fillStyle = color + '15'
+          // Bus diamond shape with green-tinted fill
+          ctx.fillStyle = color + '10'
           ctx.beginPath()
           ctx.moveTo(x + 3, midY)
           ctx.lineTo(x + 6, topY)
@@ -168,15 +196,17 @@ export default function WaveformViewer({ signals, endTime }) {
     <div style={{
       height: '100%',
       overflow: 'auto',
-      background: 'var(--bg-surface)',
+      background: '#000',
     }}>
       <div style={{
-        padding: '6px 12px 0',
-        fontSize: '12px',
-        color: 'var(--text-secondary)',
+        padding: '4px 12px',
+        fontSize: '11px',
+        color: 'var(--accent)',
         fontWeight: 500,
-        background: 'var(--bg-secondary)',
+        fontFamily: "'JetBrains Mono', monospace",
+        background: 'var(--toolbar-bg)',
         borderBottom: '1px solid var(--border)',
+        letterSpacing: '1px',
       }}>
         WAVEFORM
       </div>

@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import Toolbar from './components/Toolbar.jsx'
 import EditorPane from './components/EditorPane.jsx'
 import WaveformViewer from './components/WaveformViewer.jsx'
+import ProgressIndicator from './components/ProgressIndicator.jsx'
 import { DEFAULT_DESIGN, DEFAULT_TESTBENCH } from './defaults.js'
 
 const API_URL = 'http://localhost:8000'
@@ -12,8 +13,10 @@ function App() {
   const [simResult, setSimResult] = useState(null)
   const [simulating, setSimulating] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [generateDone, setGenerateDone] = useState(false)
   const [error, setError] = useState(null)
   const [splitPos, setSplitPos] = useState(50)
+  const [consoleOpen, setConsoleOpen] = useState(true)
 
   const handleSimulate = useCallback(async () => {
     setSimulating(true)
@@ -43,6 +46,7 @@ function App() {
 
   const handleGenerate = useCallback(async (prompt) => {
     setGenerating(true)
+    setGenerateDone(false)
     setError(null)
     setSimResult(null)
     try {
@@ -58,6 +62,9 @@ function App() {
       const data = await resp.json()
       setDesign(data.design)
       setTestbench(data.testbench)
+      setGenerateDone(true)
+      // Auto-clear the done state after 3 seconds
+      setTimeout(() => setGenerateDone(false), 3000)
     } catch (e) {
       setError(e.message)
     } finally {
@@ -82,8 +89,10 @@ function App() {
     document.addEventListener('mouseup', onMouseUp)
   }, [])
 
+  const hasConsoleOutput = simResult && (simResult.stdout || simResult.stderr)
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#000' }}>
       <Toolbar
         onSimulate={handleSimulate}
         simulating={simulating}
@@ -93,18 +102,23 @@ function App() {
         generating={generating}
       />
 
+      {/* Progress indicator */}
+      <ProgressIndicator active={generating} done={generateDone} />
+
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           {/* Editor split pane */}
           <div style={{ flex: 1, display: 'flex', position: 'relative', minHeight: 0 }}>
             <div style={{ width: `${splitPos}%`, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
               <div style={{
-                padding: '6px 12px',
-                background: 'var(--bg-secondary)',
+                padding: '4px 12px',
+                background: 'var(--toolbar-bg)',
                 borderBottom: '1px solid var(--border)',
-                fontSize: '12px',
-                color: 'var(--text-secondary)',
+                fontSize: '11px',
+                color: 'var(--accent)',
                 fontWeight: 500,
+                letterSpacing: '1px',
+                fontFamily: "'JetBrains Mono', monospace",
               }}>
                 DESIGN
               </div>
@@ -116,7 +130,7 @@ function App() {
             <div
               onMouseDown={handleMouseDown}
               style={{
-                width: '4px',
+                width: '2px',
                 cursor: 'col-resize',
                 background: 'var(--border)',
                 flexShrink: 0,
@@ -128,12 +142,14 @@ function App() {
 
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
               <div style={{
-                padding: '6px 12px',
-                background: 'var(--bg-secondary)',
+                padding: '4px 12px',
+                background: 'var(--toolbar-bg)',
                 borderBottom: '1px solid var(--border)',
-                fontSize: '12px',
-                color: 'var(--text-secondary)',
+                fontSize: '11px',
+                color: 'var(--accent)',
                 fontWeight: 500,
+                letterSpacing: '1px',
+                fontFamily: "'JetBrains Mono', monospace",
               }}>
                 TESTBENCH
               </div>
@@ -157,21 +173,51 @@ function App() {
         </div>
       </div>
 
-      {/* Console output */}
-      {simResult && (simResult.stdout || simResult.stderr) && (
+      {/* Collapsible console output */}
+      {hasConsoleOutput && (
         <div style={{
-          height: '100px',
           borderTop: '1px solid var(--border)',
-          background: 'var(--bg-surface)',
-          overflow: 'auto',
-          padding: '8px 12px',
-          fontSize: '12px',
-          fontFamily: "'JetBrains Mono', monospace",
-          color: 'var(--text-dim)',
+          background: '#000',
         }}>
-          <div style={{ color: 'var(--text-secondary)', marginBottom: '4px', fontWeight: 500 }}>Console</div>
-          {simResult.stderr && <pre style={{ color: 'var(--red)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
-          {simResult.stdout && <pre style={{ whiteSpace: 'pre-wrap' }}>{simResult.stdout}</pre>}
+          <div
+            onClick={() => setConsoleOpen(!consoleOpen)}
+            style={{
+              padding: '3px 12px',
+              fontSize: '11px',
+              color: 'var(--accent)',
+              fontWeight: 500,
+              fontFamily: "'JetBrains Mono', monospace",
+              background: 'var(--toolbar-bg)',
+              borderBottom: consoleOpen ? '1px solid var(--border)' : 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              letterSpacing: '1px',
+              userSelect: 'none',
+            }}
+          >
+            <span style={{
+              display: 'inline-block',
+              transform: consoleOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+              transition: 'transform 0.2s',
+              fontSize: '10px',
+            }}>&#9654;</span>
+            CONSOLE
+          </div>
+          {consoleOpen && (
+            <div style={{
+              height: '80px',
+              overflow: 'auto',
+              padding: '6px 12px',
+              fontSize: '11px',
+              fontFamily: "'JetBrains Mono', monospace",
+              color: 'var(--text-dim)',
+            }}>
+              {simResult.stderr && <pre style={{ color: 'var(--red)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
+              {simResult.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{simResult.stdout}</pre>}
+            </div>
+          )}
         </div>
       )}
     </div>
