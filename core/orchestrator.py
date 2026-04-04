@@ -131,6 +131,7 @@ def _fix_verilog(verilog: str) -> str:
     """Apply all post-processing fixes to Verilog code."""
     code = verilog
     code = _fix_reg_declarations(code)
+    code = _fix_duplicate_reg_declarations(code)
     code = _fix_missing_semicolons(code)
     code = _fix_undeclared_regs(code)
     code = _strip_systemverilog(code)
@@ -182,6 +183,53 @@ def _fix_reg_declarations(verilog: str) -> str:
             if re.match(pattern, line.rstrip(",").rstrip(");")) and "reg" not in line:
                 line = line.replace("output ", "output reg ", 1)
                 break
+        new_lines.append(line)
+
+    return "\n".join(new_lines)
+
+
+def _fix_duplicate_reg_declarations(verilog: str) -> str:
+    """Remove duplicate reg declarations for signals already declared as output reg.
+
+    LLMs often generate both 'output reg [3:0] q' in the port list AND
+    'reg [3:0] q;' in the module body, causing iverilog to error with
+    'has already been declared in this scope'.
+    """
+
+    lines = verilog.split("\n")
+
+    # Collect signals declared as output reg (or input reg) in the port list
+    port_reg_names = set()
+    in_port_list = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("module "):
+            in_port_list = True
+        if in_port_list:
+            m = re.match(
+                r"\s*(?:output|input)\s+reg\s+(?:\[[\d:]+\]\s+)?(\w+)",
+                stripped.rstrip(",").rstrip(");"),
+            )
+            if m:
+                port_reg_names.add(m.group(1))
+            if ");" in stripped:
+                in_port_list = False
+
+    if not port_reg_names:
+        return verilog
+
+    # Remove standalone reg declarations for those same signals in the body
+    new_lines = []
+    past_ports = False
+    for line in lines:
+        stripped = line.strip()
+        if ");" in stripped:
+            past_ports = True
+        if past_ports:
+            # Match: reg q; or reg [3:0] q; (standalone declarations, not inside always)
+            m = re.match(r"\s*reg\s+(?:\[[\d:]+\]\s+)?(\w+)\s*;", stripped)
+            if m and m.group(1) in port_reg_names:
+                continue  # skip this duplicate line
         new_lines.append(line)
 
     return "\n".join(new_lines)
