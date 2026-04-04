@@ -7,6 +7,46 @@ import { DEFAULT_DESIGN, DEFAULT_TESTBENCH } from './defaults.js'
 
 const API_URL = 'http://localhost:8000'
 
+/** Reusable horizontal drag handle with green grabber dots. */
+function HorizDragHandle({ onMouseDown }) {
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      style={{
+        height: '6px',
+        cursor: 'row-resize',
+        background: '#111',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        touchAction: 'none',
+        position: 'relative',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = '#0a1a0a'
+        e.currentTarget.querySelector('.grabber').style.opacity = '1'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = '#111'
+        e.currentTarget.querySelector('.grabber').style.opacity = '0.5'
+      }}
+    >
+      {/* Three green grabber dots */}
+      <div className="grabber" style={{
+        display: 'flex',
+        gap: '4px',
+        opacity: 0.5,
+        transition: 'opacity 0.15s',
+      }}>
+        <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent)' }} />
+        <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent)' }} />
+        <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent)' }} />
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const [design, setDesign] = useState(DEFAULT_DESIGN)
   const [testbench, setTestbench] = useState(DEFAULT_TESTBENCH)
@@ -18,6 +58,7 @@ function App() {
   const [splitPos, setSplitPos] = useState(50)
   const [consoleOpen, setConsoleOpen] = useState(true)
   const [consoleHeight, setConsoleHeight] = useState(100)
+  const [waveformHeight, setWaveformHeight] = useState(280)
 
   const handleSimulate = useCallback(async () => {
     setSimulating(true)
@@ -64,7 +105,6 @@ function App() {
       setDesign(data.design)
       setTestbench(data.testbench)
       setGenerateDone(true)
-      // Auto-clear the done state after 3 seconds
       setTimeout(() => setGenerateDone(false), 3000)
     } catch (e) {
       setError(e.message)
@@ -90,6 +130,24 @@ function App() {
     document.addEventListener('mouseup', onMouseUp)
   }, [])
 
+  const handleWaveformResizeDown = useCallback((e) => {
+    e.preventDefault()
+    const startY = e.clientY
+    const startHeight = waveformHeight
+
+    const onMouseMove = (e) => {
+      const delta = e.clientY - startY
+      const maxH = window.innerHeight * 0.6
+      setWaveformHeight(Math.max(100, Math.min(maxH, startHeight + delta)))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [waveformHeight])
+
   const handleConsoleResizeDown = useCallback((e) => {
     e.preventDefault()
     const startY = e.clientY
@@ -109,6 +167,7 @@ function App() {
   }, [consoleHeight])
 
   const hasConsoleOutput = simResult && (simResult.stdout || simResult.stderr)
+  const hasWaveforms = simResult?.signals?.length > 0
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#000' }}>
@@ -178,17 +237,19 @@ function App() {
             </div>
           </div>
 
-          {/* Waveform viewer */}
-          <div style={{
-            height: simResult?.signals?.length ? '280px' : '0px',
-            borderTop: simResult?.signals?.length ? '1px solid var(--border)' : 'none',
-            transition: 'height 0.3s ease',
-            overflow: 'hidden',
-          }}>
-            {simResult?.signals?.length > 0 && (
-              <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} />
-            )}
-          </div>
+          {/* Waveform drag handle + viewer */}
+          {hasWaveforms && (
+            <>
+              <HorizDragHandle onMouseDown={handleWaveformResizeDown} />
+              <div style={{
+                height: `${waveformHeight}px`,
+                overflow: 'hidden',
+                flexShrink: 0,
+              }}>
+                <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} />
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -200,18 +261,7 @@ function App() {
         }}>
           {/* Drag handle for resizing */}
           {consoleOpen && (
-            <div
-              onMouseDown={handleConsoleResizeDown}
-              style={{
-                height: '4px',
-                cursor: 'row-resize',
-                background: 'var(--border)',
-                flexShrink: 0,
-                transition: 'background 0.15s',
-              }}
-              onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
-              onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
-            />
+            <HorizDragHandle onMouseDown={handleConsoleResizeDown} />
           )}
           <div
             onClick={() => setConsoleOpen(!consoleOpen)}
