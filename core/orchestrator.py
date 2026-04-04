@@ -198,22 +198,22 @@ def _fix_duplicate_reg_declarations(verilog: str) -> str:
 
     lines = verilog.split("\n")
 
-    # Collect signals declared as output reg (or input reg) in the port list
+    # Extract the full port list text (may span one or many lines)
+    full_text = verilog
+    port_list_match = re.search(r'module\s+\w+\s*\((.*?)\)\s*;', full_text, re.DOTALL)
+
     port_reg_names = set()
-    in_port_list = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("module "):
-            in_port_list = True
-        if in_port_list:
+    if port_list_match:
+        port_list_text = port_list_match.group(1)
+        # Split by comma to handle single-line and multi-line declarations
+        for port_decl in port_list_text.split(","):
+            port_decl = port_decl.strip()
             m = re.match(
-                r"\s*(?:output|input)\s+reg\s+(?:\[[\d:]+\]\s+)?(\w+)",
-                stripped.rstrip(",").rstrip(");"),
+                r'(?:output|input)\s+reg\s+(?:\[[\d:]+\]\s+)?(\w+)',
+                port_decl,
             )
             if m:
                 port_reg_names.add(m.group(1))
-            if ");" in stripped:
-                in_port_list = False
 
     if not port_reg_names:
         return verilog
