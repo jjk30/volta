@@ -567,6 +567,18 @@ async def chat(req: ChatRequest):
             detail=f"Chat failed: {e}. Is Ollama running?",
         )
 
+    # Strip model special tokens (RTLCoder, CodeLlama, etc.)
+    for token in [
+        "<|EOT|>", "<|endoftext|>",
+        "<|begin_of_sentence|>", "<|end_of_sentence|>",
+        "<\uff5cend\u2581of\u2581sentence\uff5c>",
+        "<\uff5cbegin\u2581of\u2581sentence\uff5c>",
+    ]:
+        reply = reply.replace(token, "")
+    # Case-insensitive fallback for any remaining variants
+    reply = re.sub(r'<\|?(?:EOT|endoftext|begin_of_sentence|end_of_sentence)\|?>', '', reply, flags=re.I)
+    reply = reply.strip()
+
     # Post-Ollama filter: if the model answered an off-topic question anyway,
     # override with refusal. Heuristic: if reply is long and doesn't mention
     # any hardware terms, it's likely off-topic.
