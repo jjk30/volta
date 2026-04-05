@@ -1,67 +1,4 @@
-import { useState, useEffect } from 'react'
 import ChipIcon from './ChipIcon.jsx'
-
-const GEN_STAGES = [
-  'Interpreting prompt...',
-  'Building design spec...',
-  'Generating Verilog...',
-  'Verifying with Yosys...',
-  'Creating testbench...',
-  'Compiling...',
-]
-
-const SIM_STAGES = [
-  'Compiling design...',
-  'Linking testbench...',
-  'Running iverilog...',
-  'Parsing VCD...',
-  'Rendering waveform...',
-]
-
-function LoadingIndicator({ stages }) {
-  const [stageIdx, setStageIdx] = useState(0)
-
-  useEffect(() => {
-    setStageIdx(0)
-    const timer = setInterval(() => {
-      setStageIdx((prev) => (prev + 1) % stages.length)
-    }, 800)
-    return () => clearInterval(timer)
-  }, [stages])
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-      <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: '#00ff41',
-              animation: `toolbar-dot 1.2s ease-in-out ${i * 0.2}s infinite`,
-            }}
-          />
-        ))}
-      </div>
-      <span style={{
-        fontSize: '10px',
-        color: 'var(--accent)',
-        fontFamily: "'JetBrains Mono', monospace",
-        whiteSpace: 'nowrap',
-      }}>
-        {stages[stageIdx]}
-      </span>
-      <style>{`
-        @keyframes toolbar-dot {
-          0%, 100% { opacity: 0.3; transform: scale(0.8); }
-          50% { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
-    </div>
-  )
-}
 
 const selectStyle = {
   padding: '3px 6px',
@@ -188,28 +125,25 @@ export default function Toolbar({
           }}
         />
         {generating ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-            <LoadingIndicator stages={GEN_STAGES} />
-            <button
-              onClick={onCancelGenerate}
-              style={{
-                padding: '2px 8px',
-                border: '1px solid #ff4444',
-                borderRadius: '3px',
-                background: 'transparent',
-                color: '#ff4444',
-                fontSize: '10px',
-                fontWeight: 600,
-                fontFamily: "'JetBrains Mono', monospace",
-                cursor: 'pointer',
-                flexShrink: 0,
-              }}
-              onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
-              onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
-            >
-              CANCEL
-            </button>
-          </div>
+          <button
+            onClick={onCancelGenerate}
+            style={{
+              padding: '2px 8px',
+              border: '1px solid #ff4444',
+              borderRadius: '3px',
+              background: 'transparent',
+              color: '#ff4444',
+              fontSize: '10px',
+              fontWeight: 600,
+              fontFamily: "'JetBrains Mono', monospace",
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
+            onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
+          >
+            CANCEL
+          </button>
         ) : (
           <button
             onClick={handleGenerate}
@@ -237,28 +171,25 @@ export default function Toolbar({
 
       {/* Simulate button */}
       {simulating ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-          <LoadingIndicator stages={SIM_STAGES} />
-          <button
-            onClick={onCancelSimulate}
-            style={{
-              padding: '3px 10px',
-              border: '1px solid #ff4444',
-              borderRadius: '3px',
-              background: 'transparent',
-              color: '#ff4444',
-              fontSize: '11px',
-              fontWeight: 600,
-              fontFamily: "'JetBrains Mono', monospace",
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-            onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
-            onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
-          >
-            CANCEL
-          </button>
-        </div>
+        <button
+          onClick={onCancelSimulate}
+          style={{
+            padding: '3px 10px',
+            border: '1px solid #ff4444',
+            borderRadius: '3px',
+            background: 'transparent',
+            color: '#ff4444',
+            fontSize: '11px',
+            fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
+          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
+        >
+          CANCEL
+        </button>
       ) : (
         <button
           onClick={onSimulate}
