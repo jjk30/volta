@@ -407,11 +407,84 @@ SHORT_FOLLOWUP_INSTRUCTION = (
 )
 
 
-def _truncate_to_sentences(text: str, max_sentences: int = 2) -> str:
-    """Hard-truncate text to the first N sentences.
+def _truncate_short(text: str) -> str:
+    """List-aware truncation for short mode.
 
-    Strips code blocks before counting so fenced code doesn't eat
-    the sentence budget. Splits on sentence-ending punctuation (. ! ?).
+    Splits response into blocks (paragraphs and bullet lists treated as
+    atomic units). Returns the first 1-2 blocks, never cutting mid-list.
+    Falls back to sentence-based truncation if no lists are found.
+    Hard cap at 600 chars.
+    """
+
+    CHAR_CAP = 600
+    text = text.strip()
+
+    if len(text) <= CHAR_CAP:
+        return text
+
+    # Split into lines and group into blocks:
+    # consecutive bullet/numbered lines = one block, paragraphs = separate blocks
+    lines = text.split("\n")
+    blocks = []
+    current_block = []
+    in_list = False
+
+    for line in lines:
+        stripped = line.strip()
+        is_bullet = bool(re.match(r'^[-*\u2022]\s|^\d+[.)]\s', stripped))
+
+        if not stripped:
+            # Empty line = block separator (unless inside a list)
+            if current_block:
+                blocks.append("\n".join(current_block))
+                current_block = []
+                in_list = False
+            continue
+
+        if is_bullet:
+            if not in_list and current_block:
+                # Previous non-list content is its own block
+                blocks.append("\n".join(current_block))
+                current_block = []
+            in_list = True
+            current_block.append(line)
+        else:
+            if in_list and current_block:
+                # End of list block
+                blocks.append("\n".join(current_block))
+                current_block = []
+                in_list = False
+            current_block.append(line)
+
+    if current_block:
+        blocks.append("\n".join(current_block))
+
+    if not blocks:
+        return text[:CHAR_CAP]
+
+    # Take first 1-2 blocks that fit within char cap
+    result = blocks[0]
+    if len(blocks) > 1:
+        candidate = result + "\n\n" + blocks[1]
+        if len(candidate) <= CHAR_CAP:
+            result = candidate
+
+    # If result exceeds cap, trim back to just the first block
+    if len(result) > CHAR_CAP:
+        result = blocks[0]
+
+    # If still too long (single giant block), fall back to sentence truncation
+    if len(result) > CHAR_CAP:
+        result = _truncate_to_sentences(result, max_sentences=5)
+
+    return result.strip()
+
+
+def _truncate_to_sentences(text: str, max_sentences: int = 5) -> str:
+    """Sentence-based truncation fallback.
+
+    Splits on sentence-ending punctuation. Used when no list structure
+    is detected or as fallback for oversized single blocks.
     """
 
     # Remove code blocks to avoid counting sentences inside them
@@ -421,19 +494,15 @@ def _truncate_to_sentences(text: str, max_sentences: int = 2) -> str:
         code_blocks.append(m.group())
         stripped = stripped.replace(m.group(), ' __CODE_BLOCK__ ', 1)
 
-    # Split on sentence-ending punctuation followed by whitespace or end
     parts = re.split(r'(?<=[.!?])\s+', stripped.strip())
     if len(parts) <= max_sentences:
-        return text  # already short enough
+        return text
 
-    # Take first N sentences
     truncated = " ".join(parts[:max_sentences])
 
-    # Ensure it ends with punctuation
     if truncated and truncated[-1] not in ".!?":
         truncated += "."
 
-    # Restore any code blocks that fell within the kept sentences
     for block in code_blocks:
         if "__CODE_BLOCK__" in truncated:
             truncated = truncated.replace("__CODE_BLOCK__", block, 1)
@@ -507,7 +576,7 @@ async def chat(req: ChatRequest):
 
     # Detect if user wants a short response
     wants_short = bool(SHORT_KEYWORDS.search(req.message))
-    max_tokens = 200 if wants_short else 800
+    max_tokens = 300 if wants_short else 800
 
     # Build context with current design code
     context_parts = [CHAT_SYSTEM_PROMPT]
@@ -593,7 +662,7 @@ async def chat(req: ChatRequest):
 
     # Hard-truncate to 2 sentences when short mode is requested
     if wants_short:
-        reply = _truncate_to_sentences(reply, max_sentences=4)
+        reply = _truncate_short(reply)
 
     return ChatResponse(response=reply)
 

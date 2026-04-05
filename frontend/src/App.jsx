@@ -67,6 +67,8 @@ function App() {
   const [cancelled, setCancelled] = useState(null) // 'generate' | 'simulate' | null
   const [chatAutoMessage, setChatAutoMessage] = useState(null)
   const [chatWidth, setChatWidth] = useState(480)
+  const [consoleHidden, setConsoleHidden] = useState(false)
+  const [chatHidden, setChatHidden] = useState(false)
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
 
@@ -212,7 +214,7 @@ function App() {
 
     const onMouseMove = (e) => {
       const delta = startY - e.clientY
-      const maxH = window.innerHeight * 0.5
+      const maxH = window.innerHeight * 0.9
       setConsoleHeight(Math.max(60, Math.min(maxH, startHeight + delta)))
     }
     const onMouseUp = () => {
@@ -227,10 +229,29 @@ function App() {
     e.preventDefault()
     const startX = e.clientX
     const startWidth = chatWidth
+    const containerWidth = e.target.parentElement?.offsetWidth || window.innerWidth
 
     const onMouseMove = (e) => {
       const delta = startX - e.clientX  // drag left = wider chat
-      setChatWidth(Math.max(300, Math.min(800, startWidth + delta)))
+      const maxW = containerWidth - 40
+      const newWidth = Math.max(0, Math.min(maxW, startWidth + delta))
+      const consoleRemaining = containerWidth - newWidth - 4 // 4px handle
+
+      if (newWidth < 100) {
+        // Chat dragged very small → hide chat, show full console
+        setChatHidden(true)
+        setConsoleHidden(false)
+        setChatWidth(0)
+      } else if (consoleRemaining < 150) {
+        // Console would be too small → hide console, chat takes full width
+        setConsoleHidden(true)
+        setChatHidden(false)
+        setChatWidth(containerWidth)
+      } else {
+        setConsoleHidden(false)
+        setChatHidden(false)
+        setChatWidth(newWidth)
+      }
     }
     const onMouseUp = () => {
       document.removeEventListener('mousemove', onMouseMove)
@@ -397,22 +418,47 @@ function App() {
               display: 'flex',
               overflow: 'hidden',
             }}>
-              {/* Console */}
-              <div style={{
-                flex: 1,
-                minWidth: 0,
-                overflow: 'auto',
-                padding: '6px 12px',
-                fontSize: '11px',
-                fontFamily: "'JetBrains Mono', monospace",
-                color: 'var(--text-dim)',
-              }}>
-                {simResult?.stderr && <pre style={{ color: 'var(--red)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
-                {simResult?.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{simResult.stdout}</pre>}
-                {!simResult?.stderr && !simResult?.stdout && (
-                  <div style={{ color: '#222', padding: '10px 0' }}>No console output yet.</div>
-                )}
-              </div>
+              {/* Console (hidden when chat is full-width) */}
+              {!consoleHidden && (
+                <div style={{
+                  flex: chatHidden ? 1 : (consoleHidden ? 0 : 1),
+                  minWidth: 0,
+                  overflow: 'auto',
+                  padding: '6px 12px',
+                  fontSize: '11px',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  color: 'var(--text-dim)',
+                }}>
+                  {simResult?.stderr && <pre style={{ color: 'var(--red)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
+                  {simResult?.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{simResult.stdout}</pre>}
+                  {!simResult?.stderr && !simResult?.stdout && (
+                    <div style={{ color: '#222', padding: '10px 0' }}>No console output yet.</div>
+                  )}
+                </div>
+              )}
+
+              {/* Restore console button when hidden */}
+              {consoleHidden && (
+                <button
+                  onClick={() => { setConsoleHidden(false); setChatWidth(Math.min(chatWidth, window.innerWidth - 300)); }}
+                  style={{
+                    writingMode: 'vertical-rl',
+                    background: '#050505',
+                    border: 'none',
+                    borderRight: '1px solid var(--border)',
+                    color: 'var(--accent)',
+                    fontSize: '10px',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    cursor: 'pointer',
+                    padding: '8px 3px',
+                    letterSpacing: '1px',
+                    opacity: 0.6,
+                    flexShrink: 0,
+                  }}
+                >
+                  CONSOLE
+                </button>
+              )}
 
               {/* Chat left-edge drag handle */}
               <div
@@ -428,15 +474,40 @@ function App() {
                 onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
               />
 
-              {/* Chat */}
-              <div style={{ width: `${chatWidth}px`, flexShrink: 0, minWidth: 0 }}>
-                <ChatBot
-                  design={design}
-                  testbench={testbench}
-                  autoMessage={chatAutoMessage}
-                  simResult={simResult}
-                />
-              </div>
+              {/* Restore chat button when hidden */}
+              {chatHidden && (
+                <button
+                  onClick={() => { setChatHidden(false); setChatWidth(480); }}
+                  style={{
+                    writingMode: 'vertical-rl',
+                    background: '#050505',
+                    border: 'none',
+                    borderLeft: '1px solid var(--border)',
+                    color: 'var(--accent)',
+                    fontSize: '10px',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    cursor: 'pointer',
+                    padding: '8px 3px',
+                    letterSpacing: '1px',
+                    opacity: 0.6,
+                    flexShrink: 0,
+                  }}
+                >
+                  ASSISTANT
+                </button>
+              )}
+
+              {/* Chat (hidden when console is full-width) */}
+              {!chatHidden && (
+                <div style={{ width: consoleHidden ? '100%' : `${chatWidth}px`, flexShrink: 0, minWidth: 0 }}>
+                  <ChatBot
+                    design={design}
+                    testbench={testbench}
+                    autoMessage={chatAutoMessage}
+                    simResult={simResult}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
