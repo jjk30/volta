@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import Toolbar from './components/Toolbar.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import EditorPane from './components/EditorPane.jsx'
@@ -62,15 +62,22 @@ function App() {
   const [waveformHeight, setWaveformHeight] = useState(280)
   const [prompt, setPrompt] = useState('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [cancelled, setCancelled] = useState(null) // 'generate' | 'simulate' | null
+  const generateControllerRef = useRef(null)
+  const simulateControllerRef = useRef(null)
 
   const handleSimulate = useCallback(async () => {
+    const controller = new AbortController()
+    simulateControllerRef.current = controller
     setSimulating(true)
     setError(null)
+    setCancelled(null)
     try {
       const resp = await fetch(`${API_URL}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ design, testbench }),
+        signal: controller.signal,
       })
       if (!resp.ok) {
         const detail = await resp.json().catch(() => ({}))
@@ -82,23 +89,37 @@ function App() {
       }
       setSimResult(data)
     } catch (e) {
-      setError(e.message)
+      if (e.name === 'AbortError') {
+        setCancelled('simulate')
+        setTimeout(() => setCancelled(null), 2000)
+      } else {
+        setError(e.message)
+      }
       setSimResult(null)
     } finally {
       setSimulating(false)
+      simulateControllerRef.current = null
     }
   }, [design, testbench])
 
+  const handleCancelSimulate = useCallback(() => {
+    simulateControllerRef.current?.abort()
+  }, [])
+
   const handleGenerate = useCallback(async (prompt) => {
+    const controller = new AbortController()
+    generateControllerRef.current = controller
     setGenerating(true)
     setGenerateDone(false)
     setError(null)
     setSimResult(null)
+    setCancelled(null)
     try {
       const resp = await fetch(`${API_URL}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
+        signal: controller.signal,
       })
       if (!resp.ok) {
         const detail = await resp.json().catch(() => ({}))
@@ -110,10 +131,20 @@ function App() {
       setGenerateDone(true)
       setTimeout(() => setGenerateDone(false), 3000)
     } catch (e) {
-      setError(e.message)
+      if (e.name === 'AbortError') {
+        setCancelled('generate')
+        setTimeout(() => setCancelled(null), 2000)
+      } else {
+        setError(e.message)
+      }
     } finally {
       setGenerating(false)
+      generateControllerRef.current = null
     }
+  }, [])
+
+  const handleCancelGenerate = useCallback(() => {
+    generateControllerRef.current?.abort()
   }, [])
 
   const handleMouseDown = useCallback((e) => {
@@ -176,13 +207,16 @@ function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#000' }}>
       <Toolbar
         onSimulate={handleSimulate}
+        onCancelSimulate={handleCancelSimulate}
         simulating={simulating}
         error={error}
         hasResult={!!simResult}
         onGenerate={handleGenerate}
+        onCancelGenerate={handleCancelGenerate}
         generating={generating}
         prompt={prompt}
         setPrompt={setPrompt}
+        cancelled={cancelled}
       />
 
       {/* Progress indicator */}
