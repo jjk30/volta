@@ -3,10 +3,16 @@ import ReactMarkdown from 'react-markdown'
 
 const API_URL = 'http://localhost:8000'
 
-/** Convert triple-backtick short identifiers to single-backtick inline code.
- *  ```clk``` → `clk`, but leave multi-line code blocks alone. */
+/** Normalize fenced short identifiers to single-backtick inline code.
+ *  Handles ```clk```, ````clk````, ```verilog\nclk```, etc.
+ *  Only converts if content is short (<30 chars) with no newlines in the identifier. */
 function fixInlineCode(text) {
-  return text.replace(/```([^`\n]{1,30})```/g, '`$1`')
+  // Convert ``` or ```` fenced short identifiers to single backtick
+  // Match: 3+ backticks, optional language tag + newline, short content, 3+ backticks
+  let result = text.replace(/`{3,}(?:\w*\n)?([^`\n]{1,30})\n?`{3,}/g, '`$1`')
+  // Also catch cases where backticks are separated by spaces: ``` clk ```
+  result = result.replace(/`{3,}\s*([^`\n]{1,30})\s*`{3,}/g, '`$1`')
+  return result
 }
 
 function ThinkingDots() {
@@ -81,6 +87,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
         throw new Error(detail.detail || `HTTP ${resp.status}`)
       }
       const data = await resp.json()
+      console.log('[Volta Chat] Raw response:', JSON.stringify(data.response))
       setMessages([...newMessages, { role: 'assistant', content: data.response }])
     } catch (e) {
       setMessages([...newMessages, {
@@ -175,27 +182,38 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
                   strong: ({ children }) => (
                     <strong style={{ color: 'var(--accent)', fontWeight: 600 }}>{children}</strong>
                   ),
-                  code: ({ inline, children }) =>
-                    inline ? (
+                  pre: ({ children }) => (
+                    <pre style={{
+                      background: '#0a1a0a',
+                      border: '1px solid #1a4a1a',
+                      borderRadius: '3px',
+                      padding: '6px 8px',
+                      margin: '4px 0',
+                      overflow: 'auto',
+                      fontSize: '10px',
+                      color: '#ccc',
+                    }}>{children}</pre>
+                  ),
+                  code: ({ node, inline, className, children, ...props }) => {
+                    // If inside a <pre> (block code), render as-is
+                    const isBlock = !inline && className
+                    if (isBlock) {
+                      return <code style={{ color: '#ccc' }} {...props}>{children}</code>
+                    }
+                    // Everything else: compact inline code
+                    return (
                       <code style={{
-                        background: '#111',
-                        padding: '1px 4px',
+                        background: '#0a1a0a',
+                        padding: '2px 6px',
                         borderRadius: '2px',
-                        fontSize: '10px',
+                        fontSize: '0.85em',
+                        border: '1px solid #1a4a1a',
                         color: 'var(--accent)',
-                      }}>{children}</code>
-                    ) : (
-                      <pre style={{
-                        background: '#0d0d0d',
-                        border: '1px solid #1a1a1a',
-                        borderRadius: '3px',
-                        padding: '6px 8px',
-                        margin: '4px 0',
-                        overflow: 'auto',
-                        fontSize: '10px',
-                        color: '#ccc',
-                      }}><code>{children}</code></pre>
-                    ),
+                        display: 'inline',
+                        whiteSpace: 'nowrap',
+                      }} {...props}>{children}</code>
+                    )
+                  },
                   p: ({ children }) => (
                     <p style={{ margin: '4px 0' }}>{children}</p>
                   ),
