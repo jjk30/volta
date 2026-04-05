@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
 
 const API_URL = 'http://localhost:8000'
 
@@ -147,11 +148,52 @@ export default function ChatBot({ design, testbench, autoMessage }) {
               color: msg.role === 'user' ? 'var(--accent)' : '#aaa',
               fontSize: '11px',
               lineHeight: '1.5',
-              whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
             }}
           >
-            {msg.content}
+            {msg.role === 'user' ? (
+              msg.content
+            ) : (
+              <ReactMarkdown
+                components={{
+                  strong: ({ children }) => (
+                    <strong style={{ color: 'var(--accent)', fontWeight: 600 }}>{children}</strong>
+                  ),
+                  code: ({ inline, children }) =>
+                    inline ? (
+                      <code style={{
+                        background: '#111',
+                        padding: '1px 4px',
+                        borderRadius: '2px',
+                        fontSize: '10px',
+                        color: 'var(--accent)',
+                      }}>{children}</code>
+                    ) : (
+                      <pre style={{
+                        background: '#0d0d0d',
+                        border: '1px solid #1a1a1a',
+                        borderRadius: '3px',
+                        padding: '6px 8px',
+                        margin: '4px 0',
+                        overflow: 'auto',
+                        fontSize: '10px',
+                        color: '#ccc',
+                      }}><code>{children}</code></pre>
+                    ),
+                  p: ({ children }) => (
+                    <p style={{ margin: '4px 0' }}>{children}</p>
+                  ),
+                  ul: ({ children }) => (
+                    <ul style={{ margin: '4px 0', paddingLeft: '16px' }}>{children}</ul>
+                  ),
+                  li: ({ children }) => (
+                    <li style={{ margin: '2px 0' }}>{children}</li>
+                  ),
+                }}
+              >
+                {msg.content}
+              </ReactMarkdown>
+            )}
           </div>
         ))}
 
