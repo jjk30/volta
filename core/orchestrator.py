@@ -135,6 +135,7 @@ def _fix_verilog(verilog: str) -> str:
     code = _fix_missing_semicolons(code)
     code = _fix_undeclared_regs(code)
     code = _fix_undeclared_inputs(code)
+    code = _fix_input_assignments(code)
     code = _strip_systemverilog(code)
     return code
 
@@ -474,6 +475,88 @@ def _fix_undeclared_inputs(verilog: str) -> str:
         new_lines.append(line)
 
     return "\n".join(new_lines)
+
+
+def _fix_input_assignments(verilog: str) -> str:
+    """Fix input ports that are assigned inside always blocks.
+
+    When the LLM assigns to an input signal (e.g. input wire data is used
+    on the LHS of = or <=), iverilog errors with 'is not a valid l-value'.
+    Fix: remove the signal from the input port list and declare it as an
+    internal reg instead.
+    """
+
+    # Step 1: Parse the port list to find input ports
+    port_list_match = re.search(r'module\s+\w+\s*\((.*?)\)\s*;', verilog, re.DOTALL)
+    if not port_list_match:
+        return verilog
+
+    input_ports = {}  # name -> full declaration text fragment
+    for port_decl in port_list_match.group(1).split(","):
+        stripped = port_decl.strip()
+        m = re.match(r'input\s+(?:wire\s+)?(\[[\d:]+\]\s+)?(\w+)', stripped)
+        if m:
+            width_str = m.group(1)  # e.g. "[7:0] " or None
+            name = m.group(2)
+            input_ports[name] = width_str
+
+    if not input_ports:
+        return verilog
+
+    # Step 2: Scan always blocks for assignments to input ports
+    lines = verilog.split("\n")
+    in_always = False
+    assigned_inputs = set()
+
+    for line in lines:
+        stripped = line.strip()
+        if re.match(r'always\s+@', stripped):
+            in_always = True
+        if in_always:
+            for name in input_ports:
+                # Match: name = ..., name <= ..., or {name, ...} = ...
+                if re.search(rf'\b{re.escape(name)}\b\s*<?=', stripped):
+                    assigned_inputs.add(name)
+                if re.search(rf'\{{\s*{re.escape(name)}\b', stripped):
+                    assigned_inputs.add(name)
+        if stripped == "endmodule":
+            in_always = False
+
+    if not assigned_inputs:
+        return verilog
+
+    # Step 3: Remove assigned inputs from port list, add as internal reg
+    # Rebuild the port list without the offending inputs
+    port_text = port_list_match.group(1)
+    new_port_parts = []
+    for port_decl in port_text.split(","):
+        stripped = port_decl.strip()
+        m = re.match(r'input\s+(?:wire\s+)?(?:\[[\d:]+\]\s+)?(\w+)', stripped)
+        if m and m.group(1) in assigned_inputs:
+            continue  # skip this port
+        new_port_parts.append(port_decl)
+
+    # Clean up: remove leading/trailing whitespace and empty entries
+    new_port_parts = [p for p in new_port_parts if p.strip()]
+    new_port_text = ",".join(new_port_parts)
+
+    # Replace port list in original text
+    result = verilog[:port_list_match.start(1)] + new_port_text + verilog[port_list_match.end(1):]
+
+    # Find where to insert reg declarations (after ");")
+    insert_match = re.search(r'\)\s*;', result)
+    if insert_match:
+        insert_pos = insert_match.end()
+        reg_decls = []
+        for name in sorted(assigned_inputs):
+            width_str = input_ports[name]
+            if width_str:
+                reg_decls.append(f"\n  reg {width_str}{name};")
+            else:
+                reg_decls.append(f"\n  reg {name};")
+        result = result[:insert_pos] + "".join(reg_decls) + result[insert_pos:]
+
+    return result
 
 
 def _strip_systemverilog(verilog: str) -> str:
