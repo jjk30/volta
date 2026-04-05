@@ -6,6 +6,7 @@ export default function Toolbar({
   onGenerate, onCancelGenerate, generating,
   prompt, setPrompt,
   cancelled,
+  canSimulate = true,
 }) {
 
   const handleGenerate = () => {
@@ -192,29 +193,32 @@ export default function Toolbar({
       ) : (
         <button
           onClick={onSimulate}
+          disabled={!canSimulate}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '5px',
             padding: '4px 12px',
-            border: '1px solid var(--accent)',
+            border: `1px solid ${canSimulate ? 'var(--accent)' : 'var(--border)'}`,
             borderRadius: '3px',
             background: 'transparent',
-            color: 'var(--accent)',
+            color: canSimulate ? 'var(--accent)' : '#333',
             fontSize: '12px',
             fontWeight: 600,
             fontFamily: "'JetBrains Mono', monospace",
-            cursor: 'pointer',
+            cursor: canSimulate ? 'pointer' : 'default',
             transition: 'all 0.15s',
             flexShrink: 0,
           }}
           onMouseEnter={(e) => {
-            e.target.style.background = 'var(--accent)'
-            e.target.style.color = '#000'
+            if (canSimulate) {
+              e.target.style.background = 'var(--accent)'
+              e.target.style.color = '#000'
+            }
           }}
           onMouseLeave={(e) => {
             e.target.style.background = 'transparent'
-            e.target.style.color = 'var(--accent)'
+            e.target.style.color = canSimulate ? 'var(--accent)' : '#333'
           }}
         >
           <span style={{ fontSize: '11px' }}>&#9654;</span>
