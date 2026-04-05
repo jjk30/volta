@@ -396,13 +396,13 @@ SHORT_KEYWORDS = re.compile(
 )
 
 SHORT_INSTRUCTION = (
-    "CRITICAL: Respond in 2-3 sentences maximum. Use plain language. "
-    "Do not repeat previous explanations. Go straight to the point.\n\n"
+    "CRITICAL: Respond in 3-4 short sentences. Cover: what it is, "
+    "what it does, and key inputs/outputs. Use plain language.\n\n"
 )
 
 SHORT_FOLLOWUP_INSTRUCTION = (
     "CRITICAL: Continue the SAME topic as your previous response. "
-    "Respond in 2-3 sentences maximum about that same topic. "
+    "Respond in 3-4 short sentences about that same topic. "
     "Use plain language. Do not start over or change subjects.\n\n"
 )
 
@@ -507,7 +507,7 @@ async def chat(req: ChatRequest):
 
     # Detect if user wants a short response
     wants_short = bool(SHORT_KEYWORDS.search(req.message))
-    max_tokens = 80 if wants_short else 800
+    max_tokens = 200 if wants_short else 800
 
     # Build context with current design code
     context_parts = [CHAT_SYSTEM_PROMPT]
@@ -581,7 +581,7 @@ async def chat(req: ChatRequest):
 
     # Hard-truncate to 2 sentences when short mode is requested
     if wants_short:
-        reply = _truncate_to_sentences(reply, max_sentences=2)
+        reply = _truncate_to_sentences(reply, max_sentences=4)
 
     return ChatResponse(response=reply)
 
