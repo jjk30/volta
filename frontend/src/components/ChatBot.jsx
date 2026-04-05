@@ -15,7 +15,7 @@ function fixInlineCode(text) {
   return result
 }
 
-function CopyButton({ text }) {
+function CopyButton({ text, absolute = false }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async (e) => {
@@ -32,9 +32,9 @@ function CopyButton({ text }) {
       onClick={handleCopy}
       title="Copy to clipboard"
       style={{
-        position: 'absolute',
-        top: '4px',
-        right: '4px',
+        position: absolute ? 'absolute' : 'static',
+        top: absolute ? '4px' : undefined,
+        right: absolute ? '4px' : undefined,
         width: '22px',
         height: '22px',
         padding: '3px',
@@ -43,6 +43,7 @@ function CopyButton({ text }) {
         cursor: 'pointer',
         opacity: copied ? 1 : 0.4,
         transition: 'opacity 0.15s',
+        flexShrink: 0,
       }}
       onMouseEnter={(e) => { if (!copied) e.currentTarget.style.opacity = '0.9' }}
       onMouseLeave={(e) => { if (!copied) e.currentTarget.style.opacity = '0.4' }}
@@ -218,7 +219,10 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
             style={{
               alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
               maxWidth: '85%',
-              padding: msg.role === 'assistant' ? '6px 28px 6px 10px' : '6px 10px',
+            }}
+          >
+            <div style={{
+              padding: '6px 10px',
               borderRadius: '4px',
               border: `1px solid ${msg.role === 'user' ? 'var(--accent)' : '#222'}`,
               background: msg.role === 'user' ? '#001a00' : '#0a0a0a',
@@ -226,10 +230,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
               fontSize: '11px',
               lineHeight: '1.5',
               wordBreak: 'break-word',
-              position: msg.role === 'assistant' ? 'relative' : 'static',
-            }}
-          >
-            {msg.role === 'assistant' && <CopyButton text={msg.content} />}
+            }}>
             {msg.role === 'user' ? (
               msg.content
             ) : (
@@ -251,7 +252,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
 
                     return (
                       <div style={{ position: 'relative', margin: '4px 0' }}>
-                        <CopyButton text={codeText} />
+                        <CopyButton text={codeText} absolute />
                         <pre style={{
                           background: '#0a1a0a',
                           border: '1px solid #1a4a1a',
@@ -296,6 +297,17 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
                   ),
                 }}
               />
+            )}
+            </div>
+            {msg.role === 'assistant' && (
+              <div style={{
+                padding: '2px 0',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}>
+                <CopyButton text={msg.content} />
+              </div>
             )}
           </div>
         ))}
