@@ -434,6 +434,7 @@ function App() {
                   design={design}
                   testbench={testbench}
                   autoMessage={chatAutoMessage}
+                  simResult={simResult}
                 />
               </div>
             </div>
