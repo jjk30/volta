@@ -239,18 +239,32 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
                   strong: ({ children }) => (
                     <strong style={{ color: 'var(--accent)', fontWeight: 600 }}>{children}</strong>
                   ),
-                  pre: ({ children }) => (
-                    <pre style={{
-                      background: '#0a1a0a',
-                      border: '1px solid #1a4a1a',
-                      borderRadius: '3px',
-                      padding: '6px 8px',
-                      margin: '4px 0',
-                      overflow: 'auto',
-                      fontSize: '10px',
-                      color: '#ccc',
-                    }}>{children}</pre>
-                  ),
+                  pre: ({ children }) => {
+                    // Extract text content from children for copy
+                    const extractText = (node) => {
+                      if (typeof node === 'string') return node
+                      if (Array.isArray(node)) return node.map(extractText).join('')
+                      if (node?.props?.children) return extractText(node.props.children)
+                      return ''
+                    }
+                    const codeText = extractText(children).trim()
+
+                    return (
+                      <div style={{ position: 'relative', margin: '4px 0' }}>
+                        <CopyButton text={codeText} />
+                        <pre style={{
+                          background: '#0a1a0a',
+                          border: '1px solid #1a4a1a',
+                          borderRadius: '3px',
+                          padding: '6px 28px 6px 8px',
+                          overflow: 'auto',
+                          fontSize: '10px',
+                          color: '#ccc',
+                          margin: 0,
+                        }}>{children}</pre>
+                      </div>
+                    )
+                  },
                   code: ({ node, inline, className, children, ...props }) => {
                     // If inside a <pre> (block code), render as-is
                     const isBlock = !inline && className
