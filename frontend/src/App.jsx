@@ -220,6 +220,8 @@ function App() {
 
   const hasConsoleOutput = simResult && (simResult.stdout || simResult.stderr)
   const hasWaveforms = simResult?.signals?.length > 0
+  const hasRealCode = (code) => code.replace(/\/\/.*$/gm, '').trim().length > 0
+  const canSimulate = hasRealCode(design) && hasRealCode(testbench)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#000' }}>
@@ -235,6 +237,7 @@ function App() {
         prompt={prompt}
         setPrompt={setPrompt}
         cancelled={cancelled}
+        canSimulate={canSimulate}
       />
 
       {/* Progress indicator */}
