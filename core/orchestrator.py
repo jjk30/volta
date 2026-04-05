@@ -134,6 +134,7 @@ def _fix_verilog(verilog: str) -> str:
     code = _fix_duplicate_reg_declarations(code)
     code = _fix_missing_semicolons(code)
     code = _fix_undeclared_regs(code)
+    code = _fix_undeclared_inputs(code)
     code = _strip_systemverilog(code)
     return code
 
@@ -350,6 +351,129 @@ def _fix_undeclared_regs(verilog: str) -> str:
         lines = lines[:insert_idx] + [""] + decls + lines[insert_idx:]
 
     return "\n".join(lines)
+
+
+def _fix_undeclared_inputs(verilog: str) -> str:
+    """Detect identifiers used on the RHS of assignments but never declared,
+    and add them as input wire ports to the module declaration.
+
+    For names suggesting a data bus (tx_data, rx_data, data, din, etc.),
+    defaults to [7:0]. Otherwise 1-bit.
+    """
+
+    # Verilog keywords and built-in functions to ignore
+    KEYWORDS = {
+        "if", "else", "case", "casex", "casez", "begin", "end", "endcase",
+        "default", "for", "while", "assign", "always", "initial", "module",
+        "endmodule", "input", "output", "inout", "wire", "reg", "integer",
+        "parameter", "localparam", "posedge", "negedge", "or", "and", "not",
+        "xor", "nor", "nand", "xnor", "buf",
+    }
+
+    # Data bus name patterns → default to [7:0]
+    DATA_BUS_PATTERNS = re.compile(
+        r'(data|din|dout|tx_data|rx_data|d_in|d_out|wdata|rdata|wr_data|rd_data)',
+        re.I,
+    )
+
+    # Step 1: Collect all declared identifiers
+    port_list_match = re.search(r'module\s+\w+\s*\((.*?)\)\s*;', verilog, re.DOTALL)
+    if not port_list_match:
+        return verilog
+
+    declared = set()
+    # Ports from module declaration
+    for port_decl in port_list_match.group(1).split(","):
+        m = re.match(
+            r'\s*(?:input|output|inout)\s+(?:reg\s+)?(?:wire\s+)?(?:\[[\d:]+\]\s+)?(\w+)',
+            port_decl.strip(),
+        )
+        if m:
+            declared.add(m.group(1))
+
+    # Internal wire/reg/integer declarations in the body
+    body_start = port_list_match.end()
+    body = verilog[body_start:]
+    for m in re.finditer(r'(?:wire|reg|integer)\s+(?:\[[\d:]+\]\s+)?(\w+)', body):
+        declared.add(m.group(1))
+
+    # Module name itself
+    mod_m = re.match(r'module\s+(\w+)', verilog)
+    if mod_m:
+        declared.add(mod_m.group(1))
+
+    # Step 2: Find all identifiers used on the RHS of assignments
+    # First, strip Verilog numeric literals to avoid false positives
+    # (e.g., 1'b0 → b0, 8'hFF → hFF would be captured as identifiers)
+    cleaned_body = re.sub(r"\d+'[bBhHoOdD][0-9a-fA-F_xXzZ]+", "", body)
+
+    rhs_identifiers = set()
+    for m in re.finditer(r'<?=\s*(.+?)\s*;', cleaned_body):
+        rhs = m.group(1)
+        for ident in re.findall(r'\b([a-zA-Z_]\w*)\b', rhs):
+            rhs_identifiers.add(ident)
+
+    # Also check condition expressions: if (foo), case(foo)
+    for m in re.finditer(r'(?:if|case|casex|casez)\s*\((.+?)\)', cleaned_body):
+        expr = m.group(1)
+        for ident in re.findall(r'\b([a-zA-Z_]\w*)\b', expr):
+            rhs_identifiers.add(ident)
+
+    # Step 3: Find undeclared identifiers (not keywords, not numeric-like)
+    undeclared = set()
+    for ident in rhs_identifiers:
+        if ident in declared:
+            continue
+        if ident in KEYWORDS:
+            continue
+        if ident.isdigit():
+            continue
+        # Skip Verilog system tasks and common constants
+        if ident.startswith("$") or ident in ("0", "1"):
+            continue
+        undeclared.add(ident)
+
+    if not undeclared:
+        return verilog
+
+    # Step 4: Add as input wire ports to the module declaration
+    # Determine width for each undeclared signal
+    new_ports = []
+    for name in sorted(undeclared):
+        if DATA_BUS_PATTERNS.search(name):
+            new_ports.append(f"input wire [7:0] {name}")
+        else:
+            new_ports.append(f"input wire {name}")
+
+    # Insert into the port list — find the closing ");" and add before it
+    # Work on the original text to preserve formatting
+    lines = verilog.split("\n")
+    new_lines = []
+    inserted = False
+
+    for i, line in enumerate(lines):
+        if not inserted and ");" in line:
+            # Add new ports before the closing ");
+            indent = "  "
+            # Check if the previous non-empty line ends with comma
+            prev_content = line[:line.index(");")].rstrip()
+            for port_str in new_ports:
+                # Add comma to previous port line if needed
+                if new_lines:
+                    last = new_lines[-1].rstrip()
+                    if last and not last.endswith(",") and not last.endswith("("):
+                        # Find the last line that has port content
+                        for j in range(len(new_lines) - 1, -1, -1):
+                            stripped = new_lines[j].rstrip()
+                            if stripped and not stripped.startswith("//"):
+                                if not stripped.endswith(",") and not stripped.endswith("("):
+                                    new_lines[j] = stripped + ","
+                                break
+                new_lines.append(f"{indent}{port_str}")
+            inserted = True
+        new_lines.append(line)
+
+    return "\n".join(new_lines)
 
 
 def _strip_systemverilog(verilog: str) -> str:
