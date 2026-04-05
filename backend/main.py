@@ -347,12 +347,28 @@ class ChatResponse(BaseModel):
     response: str
 
 
+SHORT_KEYWORDS = re.compile(
+    r'\b(short|brief|simple|concise|tldr|tl;dr|summary|quickly|shorter'
+    r'|in \d+ sentences?|one sentence|two sentences?|three sentences?)\b',
+    re.I,
+)
+
+SHORT_INSTRUCTION = (
+    "CRITICAL: Respond in 2-3 sentences maximum. Use plain language. "
+    "Do not repeat previous explanations. Go straight to the point.\n\n"
+)
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     """Chat with Volta's hardware design assistant."""
 
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message is empty")
+
+    # Detect if user wants a short response
+    wants_short = bool(SHORT_KEYWORDS.search(req.message))
+    max_tokens = 150 if wants_short else 800
 
     # Build context with current design code
     context_parts = [CHAT_SYSTEM_PROMPT]
@@ -363,13 +379,18 @@ async def chat(req: ChatRequest):
 
     system_context = "\n".join(context_parts)
 
-    # Build conversation for Ollama
-    # Ollama's /api/generate uses a single prompt, so we flatten history
+    # Build conversation — include last 3 exchanges for context
     conversation = system_context + "\n\n"
-    for msg in req.history:
+    recent_history = req.history[-6:]  # last 3 exchanges = 6 messages
+    for msg in recent_history:
         prefix = "User" if msg.role == "user" else "Assistant"
         conversation += f"{prefix}: {msg.content}\n\n"
-    conversation += f"User: {req.message}\n\nAssistant:"
+
+    # Prepend short instruction if length keywords detected
+    user_message = req.message
+    if wants_short:
+        conversation += SHORT_INSTRUCTION
+    conversation += f"User: {user_message}\n\nAssistant:"
 
     try:
         import requests as http_requests
@@ -377,7 +398,7 @@ async def chat(req: ChatRequest):
             "model": "codellama:7b",
             "prompt": conversation,
             "stream": False,
-            "options": {"temperature": 0.3, "num_predict": 2048},
+            "options": {"temperature": 0.3, "num_predict": max_tokens},
         }, timeout=120)
         resp.raise_for_status()
         reply = resp.json()["response"].strip()
