@@ -321,7 +321,7 @@ CHAT_SYSTEM_PROMPT = """You are Volta's hardware design assistant. You help user
 
 You ONLY help with topics in: electrical engineering, computer engineering, computer science, ECE, VLSI, semiconductors, hardware design, Verilog/VHDL/SystemVerilog, digital logic, FPGAs, ASICs, chip design, and math relevant to these fields.
 
-For any off-topic questions (cooking, sports, entertainment, general life advice, etc.), respond exactly with: 'Sorry, I cannot help you with this. I only assist with hardware design and related engineering topics.'
+If the user's message is NOT about: electrical/computer engineering, VLSI, semiconductors, hardware design, Verilog/VHDL/SystemVerilog, digital logic, FPGAs, ASICs, chip design, or relevant math, you MUST respond with EXACTLY: 'Sorry, I cannot help you with this. I only assist with hardware design and related engineering topics.' Do not answer off-topic questions under any circumstances.
 
 IMPORTANT RESPONSE RULES:
 1) When the user asks for short/brief/concise responses, limit to 2-3 sentences maximum.
@@ -329,6 +329,35 @@ IMPORTANT RESPONSE RULES:
 3) Respect the user's length preferences above all else.
 4) Use markdown formatting: **bold** for emphasis, line breaks between paragraphs, and - for bullet points.
 5) Never repeat yourself or pad responses."""
+
+
+OFF_TOPIC_REFUSAL = (
+    "Sorry, I cannot help you with this. "
+    "I only assist with hardware design and related engineering topics."
+)
+
+OFF_TOPIC_KEYWORDS = re.compile(
+    r'\b('
+    r'actor|actress|movie|film|celebrity|bollywood|hollywood|'
+    r'sports|cricket|football|basketball|soccer|tennis|baseball|'
+    r'food|recipe|cooking|cook|bake|restaurant|'
+    r'politics|politician|election|vote|government|'
+    r'religion|god|church|temple|mosque|prayer|'
+    r'weather|forecast|temperature|rain|'
+    r'news|newspaper|headline|'
+    r'dog|cat|pet|animal|puppy|kitten|'
+    r'travel|vacation|holiday|hotel|flight|tourism|'
+    r'music|song|singer|band|concert|album|'
+    r'game|video game|gaming|playstation|xbox|nintendo|'
+    r'dating|relationship|marriage|divorce|love|'
+    r'money|investment|stock|crypto|bitcoin|trading|'
+    r'fashion|clothes|shopping|beauty|makeup|'
+    r'health|diet|weight|exercise|gym|yoga|'
+    r'astrology|horoscope|zodiac|'
+    r'joke|funny|meme|entertainment'
+    r')\b',
+    re.I,
+)
 
 
 class ChatMessage(BaseModel):
@@ -472,6 +501,10 @@ async def chat(req: ChatRequest):
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message is empty")
 
+    # Pre-Ollama keyword filter: refuse off-topic questions immediately
+    if OFF_TOPIC_KEYWORDS.search(req.message):
+        return ChatResponse(response=OFF_TOPIC_REFUSAL)
+
     # Detect if user wants a short response
     wants_short = bool(SHORT_KEYWORDS.search(req.message))
     max_tokens = 80 if wants_short else 800
@@ -533,6 +566,18 @@ async def chat(req: ChatRequest):
             status_code=502,
             detail=f"Chat failed: {e}. Is Ollama running?",
         )
+
+    # Post-Ollama filter: if the model answered an off-topic question anyway,
+    # override with refusal. Heuristic: if reply is long and doesn't mention
+    # any hardware terms, it's likely off-topic.
+    hw_terms = re.compile(
+        r'\b(verilog|module|wire|reg|signal|clock|reset|flip.?flop|gate|'
+        r'register|counter|alu|mux|fpga|asic|rtl|synthesis|testbench|'
+        r'simulation|waveform|port|bit|bus|latch|combinational|sequential)\b',
+        re.I,
+    )
+    if len(reply) > 50 and not hw_terms.search(reply):
+        reply = OFF_TOPIC_REFUSAL
 
     # Hard-truncate to 2 sentences when short mode is requested
     if wants_short:
