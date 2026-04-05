@@ -1,16 +1,21 @@
 import ChipIcon from './ChipIcon.jsx'
 
 const selectStyle = {
-  padding: '3px 6px',
+  padding: '2px 14px 2px 4px',
   background: '#000',
-  border: '1px solid var(--border)',
-  borderRadius: '3px',
+  border: '1px solid #1a1a1a',
+  borderRadius: '2px',
   color: 'var(--accent)',
-  fontSize: '10px',
+  fontSize: '0.75rem',
   fontFamily: "'JetBrains Mono', monospace",
   cursor: 'pointer',
-  width: '110px',
+  width: '80px',
   flexShrink: 0,
+  appearance: 'none',
+  WebkitAppearance: 'none',
+  backgroundImage: `url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L4 4L7 1' stroke='%2300ff41' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E")`,
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: 'right 3px center',
 }
 
 export default function Toolbar({
@@ -74,8 +79,8 @@ export default function Toolbar({
         <option disabled>Yosys</option>
       </select>
 
-      <select defaultValue="None" style={{ ...selectStyle, width: '100px' }}>
-        <option value="None">No Verif</option>
+      <select defaultValue="None" style={selectStyle}>
+        <option value="None">None</option>
         <option disabled>UVM 1.2</option>
         <option disabled>UVM 1800.2</option>
         <option disabled>OVM 2.1.2</option>
