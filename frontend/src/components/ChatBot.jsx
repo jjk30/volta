@@ -15,6 +15,52 @@ function fixInlineCode(text) {
   return result
 }
 
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async (e) => {
+    e.stopPropagation()
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      title="Copy to clipboard"
+      style={{
+        position: 'absolute',
+        top: '4px',
+        right: '4px',
+        width: '22px',
+        height: '22px',
+        padding: '3px',
+        background: 'none',
+        border: 'none',
+        cursor: 'pointer',
+        opacity: copied ? 1 : 0.4,
+        transition: 'opacity 0.15s',
+      }}
+      onMouseEnter={(e) => { if (!copied) e.currentTarget.style.opacity = '0.9' }}
+      onMouseLeave={(e) => { if (!copied) e.currentTarget.style.opacity = '0.4' }}
+    >
+      {copied ? (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M3 8.5L6 11.5L13 4.5" stroke="#00ff41" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : (
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="5" y="5" width="8" height="8" rx="1" stroke="#666" strokeWidth="1.5" />
+          <path d="M3 11V3C3 2.45 3.45 2 4 2H10" stroke="#666" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
+      )}
+    </button>
+  )
+}
+
 function ThinkingDots() {
   return (
     <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
@@ -172,7 +218,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
             style={{
               alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
               maxWidth: '85%',
-              padding: '6px 10px',
+              padding: msg.role === 'assistant' ? '6px 28px 6px 10px' : '6px 10px',
               borderRadius: '4px',
               border: `1px solid ${msg.role === 'user' ? 'var(--accent)' : '#222'}`,
               background: msg.role === 'user' ? '#001a00' : '#0a0a0a',
@@ -180,8 +226,10 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
               fontSize: '11px',
               lineHeight: '1.5',
               wordBreak: 'break-word',
+              position: msg.role === 'assistant' ? 'relative' : 'static',
             }}
           >
+            {msg.role === 'assistant' && <CopyButton text={msg.content} />}
             {msg.role === 'user' ? (
               msg.content
             ) : (
