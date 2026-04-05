@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import Toolbar from './components/Toolbar.jsx'
+import Sidebar from './components/Sidebar.jsx'
 import EditorPane from './components/EditorPane.jsx'
 import WaveformViewer from './components/WaveformViewer.jsx'
 import ProgressIndicator from './components/ProgressIndicator.jsx'
@@ -59,6 +60,8 @@ function App() {
   const [consoleOpen, setConsoleOpen] = useState(true)
   const [consoleHeight, setConsoleHeight] = useState(100)
   const [waveformHeight, setWaveformHeight] = useState(280)
+  const [prompt, setPrompt] = useState('')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   const handleSimulate = useCallback(async () => {
     setSimulating(true)
@@ -178,12 +181,19 @@ function App() {
         hasResult={!!simResult}
         onGenerate={handleGenerate}
         generating={generating}
+        prompt={prompt}
+        setPrompt={setPrompt}
       />
 
       {/* Progress indicator */}
       <ProgressIndicator active={generating} done={generateDone} />
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        <Sidebar
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
+          onSelectExample={setPrompt}
+        />
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           {/* Editor split pane */}
           <div style={{ flex: 1, display: 'flex', position: 'relative', minHeight: 0 }}>
