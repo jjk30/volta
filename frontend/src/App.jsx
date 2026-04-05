@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar.jsx'
 import EditorPane from './components/EditorPane.jsx'
 import WaveformViewer from './components/WaveformViewer.jsx'
 import ProgressIndicator from './components/ProgressIndicator.jsx'
+import ChatBot from './components/ChatBot.jsx'
 import { DEFAULT_DESIGN, DEFAULT_TESTBENCH } from './defaults.js'
 
 const API_URL = 'http://localhost:8000'
@@ -64,6 +65,8 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(280)
   const [cancelled, setCancelled] = useState(null) // 'generate' | 'simulate' | null
+  const [chatAutoMessage, setChatAutoMessage] = useState(null)
+  const [bottomSplitPos, setBottomSplitPos] = useState(60) // console takes 60%, chat 40%
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
 
@@ -131,6 +134,8 @@ function App() {
       setTestbench(data.testbench)
       setGenerateDone(true)
       setTimeout(() => setGenerateDone(false), 3000)
+      // Trigger auto-explain in chatbot (unique key to trigger each time)
+      setChatAutoMessage(`explain-${Date.now()}`)
     } catch (e) {
       if (e.name === 'AbortError') {
         setCancelled('generate')
@@ -217,6 +222,23 @@ function App() {
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
   }, [consoleHeight])
+
+  const handleBottomSplitDown = useCallback((e) => {
+    e.preventDefault()
+    const container = e.target.parentElement
+    const rect = container.getBoundingClientRect()
+
+    const onMouseMove = (e) => {
+      const pct = ((e.clientX - rect.left) / rect.width) * 100
+      setBottomSplitPos(Math.max(20, Math.min(80, pct)))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [])
 
   const hasConsoleOutput = simResult && (simResult.stdout || simResult.stderr)
   const hasWaveforms = simResult?.signals?.length > 0
@@ -333,13 +355,12 @@ function App() {
         </div>
       </div>
 
-      {/* Collapsible, resizable console output */}
-      {hasConsoleOutput && (
+      {/* Bottom panel: Console + Chat side by side */}
+      {(hasConsoleOutput || chatAutoMessage) && (
         <div style={{
           background: '#000',
           flexShrink: 0,
         }}>
-          {/* Drag handle for resizing */}
           {consoleOpen && (
             <HorizDragHandle onMouseDown={handleConsoleResizeDown} />
           )}
@@ -368,19 +389,53 @@ function App() {
               transition: 'transform 0.2s',
               fontSize: '10px',
             }}>&#9654;</span>
-            CONSOLE
+            CONSOLE &amp; ASSISTANT
           </div>
           {consoleOpen && (
             <div style={{
               height: `${consoleHeight}px`,
-              overflow: 'auto',
-              padding: '6px 12px',
-              fontSize: '11px',
-              fontFamily: "'JetBrains Mono', monospace",
-              color: 'var(--text-dim)',
+              display: 'flex',
+              overflow: 'hidden',
             }}>
-              {simResult.stderr && <pre style={{ color: 'var(--red)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
-              {simResult.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{simResult.stdout}</pre>}
+              {/* Console */}
+              <div style={{
+                width: `${bottomSplitPos}%`,
+                overflow: 'auto',
+                padding: '6px 12px',
+                fontSize: '11px',
+                fontFamily: "'JetBrains Mono', monospace",
+                color: 'var(--text-dim)',
+                borderRight: '1px solid var(--border)',
+              }}>
+                {simResult?.stderr && <pre style={{ color: 'var(--red)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
+                {simResult?.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{simResult.stdout}</pre>}
+                {!simResult?.stderr && !simResult?.stdout && (
+                  <div style={{ color: '#222', padding: '10px 0' }}>No console output yet.</div>
+                )}
+              </div>
+
+              {/* Vertical drag handle */}
+              <div
+                onMouseDown={handleBottomSplitDown}
+                style={{
+                  width: '4px',
+                  cursor: 'col-resize',
+                  background: 'var(--border)',
+                  flexShrink: 0,
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
+                onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
+              />
+
+              {/* Chat */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <ChatBot
+                  design={design}
+                  testbench={testbench}
+                  autoMessage={chatAutoMessage}
+                />
+              </div>
             </div>
           )}
         </div>
