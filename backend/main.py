@@ -336,11 +336,24 @@ class ChatMessage(BaseModel):
     content: str
 
 
+class SimSignalSummary(BaseModel):
+    name: str
+    width: int = 1
+    values: list[list] = []  # [[time, value], ...]
+
+
+class SimulationData(BaseModel):
+    signals: list[SimSignalSummary] = []
+    stdout: str = ""
+    stderr: str = ""
+
+
 class ChatRequest(BaseModel):
     message: str
     design: str = ""
     testbench: str = ""
     history: list[ChatMessage] = []
+    simulation: Optional[SimulationData] = None
 
 
 class ChatResponse(BaseModel):
@@ -393,6 +406,59 @@ def _truncate_to_sentences(text: str, max_sentences: int = 2) -> str:
     return truncated.strip()
 
 
+def _build_simulation_summary(sim: SimulationData) -> str:
+    """Build a concise summary of simulation results for the chat context.
+
+    Limits output to ~500 tokens worth of info to avoid blowing up context.
+    """
+
+    lines = ["Current simulation results:"]
+    char_budget = 1500  # ~500 tokens worth of characters
+    used = 0
+
+    for sig in sim.signals:
+        if used > char_budget:
+            lines.append("... (additional signals omitted for brevity)")
+            break
+
+        # Extract unique values and their times
+        if not sig.values:
+            continue
+
+        # Show up to 12 transitions per signal
+        transitions = sig.values[:12]
+        values = [v[1] for v in transitions]
+        times = [v[0] for v in transitions]
+
+        if sig.width == 1:
+            # Single-bit: show as 0/1 transitions
+            trans_str = ", ".join(f"t={t}: {v}" for t, v in transitions)
+        else:
+            # Multi-bit: show as decimal/hex
+            if sig.width <= 4:
+                trans_str = ", ".join(f"t={t}: {v}" for t, v in transitions)
+            else:
+                trans_str = ", ".join(
+                    f"t={t}: 0x{v:X}" for t, v in transitions
+                )
+
+        line = f"- Signal '{sig.name}' (width {sig.width}): {trans_str}"
+        if len(sig.values) > 12:
+            line += f" ... ({len(sig.values)} total transitions)"
+        lines.append(line)
+        used += len(line)
+
+    # Add console output (trimmed)
+    if sim.stdout and sim.stdout.strip():
+        stdout_trimmed = sim.stdout.strip()[:500]
+        lines.append(f"\nConsole output:\n{stdout_trimmed}")
+    if sim.stderr and sim.stderr.strip():
+        stderr_trimmed = sim.stderr.strip()[:200]
+        lines.append(f"\nConsole errors:\n{stderr_trimmed}")
+
+    return "\n".join(lines)
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     """Chat with Volta's hardware design assistant."""
@@ -410,6 +476,9 @@ async def chat(req: ChatRequest):
         context_parts.append(f"\nCurrent Verilog design:\n```verilog\n{req.design}\n```")
     if req.testbench.strip():
         context_parts.append(f"\nCurrent testbench:\n```verilog\n{req.testbench}\n```")
+    if req.simulation and req.simulation.signals:
+        sim_summary = _build_simulation_summary(req.simulation)
+        context_parts.append(f"\n{sim_summary}")
 
     system_context = "\n".join(context_parts)
 
