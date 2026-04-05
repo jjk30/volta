@@ -554,7 +554,7 @@ async def chat(req: ChatRequest):
     try:
         import requests as http_requests
         resp = http_requests.post("http://localhost:11434/api/generate", json={
-            "model": "codellama:7b",
+            "model": "rtlcoder",
             "prompt": conversation,
             "stream": False,
             "options": {"temperature": 0.3, "num_predict": max_tokens},

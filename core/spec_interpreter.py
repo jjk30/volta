@@ -36,7 +36,7 @@ from schema import (
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
 
-def call_ollama(prompt: str, model: str = "codellama:7b",
+def call_ollama(prompt: str, model: str = "rtlcoder",
                 temperature: float = 0.2, max_tokens: int = 8192) -> str:
     """Send a prompt to the local Ollama server."""
 
@@ -507,7 +507,7 @@ def build_spec(raw_json: dict, original_prompt: str) -> DesignSpec:
 MAX_INTERPRET_RETRIES = 3
 
 
-def interpret(prompt: str, model: str = "codellama:7b") -> DesignSpec:
+def interpret(prompt: str, model: str = "rtlcoder") -> DesignSpec:
     """Interpret a natural-language prompt into a structured DesignSpec.
 
     Retries up to 3 times with progressively simpler prompts:

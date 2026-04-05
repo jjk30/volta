@@ -1,0 +1,1 @@
+FROM hf.co/mradermacher/RTLCoder-Deepseek-v1.1-GGUF:Q4_K_M
