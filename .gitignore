@@ -1,2 +1,6 @@
 __pycache__/
 .claude/
+
+# Eval suite results (private, not pushed)
+tests/eval_results.json
+tests/eval_logs/
