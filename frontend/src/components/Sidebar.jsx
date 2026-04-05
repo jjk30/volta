@@ -14,8 +14,7 @@ const EXAMPLES = [
 function SidebarDropdown({ value, options }) {
   return (
     <select
-      value={value}
-      disabled
+      defaultValue={value}
       style={{
         width: '100%',
         padding: '5px 8px',
@@ -25,7 +24,7 @@ function SidebarDropdown({ value, options }) {
         color: 'var(--accent)',
         fontSize: '11px',
         fontFamily: "'JetBrains Mono', monospace",
-        cursor: 'default',
+        cursor: 'pointer',
         appearance: 'none',
         WebkitAppearance: 'none',
         backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%2300ff41' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E")`,
