@@ -111,14 +111,23 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
     }
   }
 
+  const handleWheel = (e) => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop += e.deltaY
+    }
+  }
+
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      background: '#000',
-      fontFamily: "'JetBrains Mono', monospace",
-    }}>
+    <div
+      onWheel={handleWheel}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        background: '#000',
+        fontFamily: "'JetBrains Mono', monospace",
+      }}
+    >
       {/* Header */}
       <div style={{
         padding: '3px 12px',
