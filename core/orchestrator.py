@@ -368,25 +368,35 @@ def _strip_systemverilog(verilog: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _parse_ports_from_verilog(verilog: str) -> list[dict]:
-    """Parse port declarations from Verilog source."""
+    """Parse port declarations from Verilog source.
+
+    Handles both multi-line and single-line module declarations by
+    extracting the full port list first, then parsing each port.
+    """
 
     ports = []
-    for line in verilog.split("\n"):
-        line = line.strip().rstrip(",").rstrip(");")
-        m = re.match(
-            r"(input|output)\s+(?:reg\s+)?(?:wire\s+)?(\[[\d:]+\]\s+)?(\w+)",
-            line,
-        )
-        if m:
-            direction = m.group(1)
-            width_str = m.group(2)
-            name = m.group(3)
-            if width_str:
-                wm = re.match(r"\[(\d+):(\d+)\]", width_str.strip())
-                width = int(wm.group(1)) - int(wm.group(2)) + 1 if wm else 1
-            else:
-                width = 1
-            ports.append({"name": name, "direction": direction, "width": width})
+
+    # Extract the full port list text (handles single-line and multi-line)
+    port_list_match = re.search(r'module\s+\w+\s*\((.*?)\)\s*;', verilog, re.DOTALL)
+    if port_list_match:
+        port_list_text = port_list_match.group(1)
+        for port_decl in port_list_text.split(","):
+            port_decl = port_decl.strip()
+            m = re.match(
+                r'(input|output)\s+(?:reg\s+)?(?:wire\s+)?(\[[\d:]+\]\s+)?(\w+)',
+                port_decl,
+            )
+            if m:
+                direction = m.group(1)
+                width_str = m.group(2)
+                name = m.group(3)
+                if width_str:
+                    wm = re.match(r'\[(\d+):(\d+)\]', width_str.strip())
+                    width = int(wm.group(1)) - int(wm.group(2)) + 1 if wm else 1
+                else:
+                    width = 1
+                ports.append({"name": name, "direction": direction, "width": width})
+
     return ports
 
 
