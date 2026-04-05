@@ -371,6 +371,12 @@ SHORT_INSTRUCTION = (
     "Do not repeat previous explanations. Go straight to the point.\n\n"
 )
 
+SHORT_FOLLOWUP_INSTRUCTION = (
+    "CRITICAL: Continue the SAME topic as your previous response. "
+    "Respond in 2-3 sentences maximum about that same topic. "
+    "Use plain language. Do not start over or change subjects.\n\n"
+)
+
 
 def _truncate_to_sentences(text: str, max_sentences: int = 2) -> str:
     """Hard-truncate text to the first N sentences.
@@ -492,7 +498,24 @@ async def chat(req: ChatRequest):
     # Prepend short instruction if length keywords detected
     user_message = req.message
     if wants_short:
-        conversation += SHORT_INSTRUCTION
+        word_count = len(user_message.split())
+        is_followup = word_count < 10 and req.history
+
+        if is_followup:
+            # Find the last assistant message to extract its topic
+            last_assistant = ""
+            for msg in reversed(req.history):
+                if msg.role == "assistant":
+                    last_assistant = msg.content[:200]
+                    break
+            conversation += SHORT_FOLLOWUP_INSTRUCTION
+            if last_assistant:
+                conversation += (
+                    f"Your previous response was about: {last_assistant}\n"
+                    f"Rephrase that SAME topic in 2-3 simple sentences.\n\n"
+                )
+        else:
+            conversation += SHORT_INSTRUCTION
     conversation += f"User: {user_message}\n\nAssistant:"
 
     try:
