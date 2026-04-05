@@ -1,13 +1,25 @@
 import { useState, useCallback, useRef } from 'react'
 import Toolbar from './components/Toolbar.jsx'
-import Sidebar from './components/Sidebar.jsx'
 import EditorPane from './components/EditorPane.jsx'
 import WaveformViewer from './components/WaveformViewer.jsx'
 import ProgressIndicator from './components/ProgressIndicator.jsx'
 import ChatBot from './components/ChatBot.jsx'
+import DiagramView from './components/DiagramView.jsx'
+import SymbolsLibrary from './components/SymbolsLibrary.jsx'
 import { DEFAULT_DESIGN, DEFAULT_TESTBENCH } from './defaults.js'
 
 const API_URL = 'http://localhost:8000'
+
+const EXAMPLES = [
+  'Design a 4-bit ALU with add, sub, and, or',
+  'Design a 4-bit counter with reset and enable',
+  'Design an 8-bit shift register',
+  'Design a D flip-flop with async reset',
+  'Design a 2-to-1 multiplexer',
+  'Design a 4-bit comparator',
+  'Design a UART transmitter',
+  'Design a priority encoder',
+]
 
 /** Reusable horizontal drag handle with green grabber dots. */
 function HorizDragHandle({ onMouseDown }) {
@@ -23,7 +35,6 @@ function HorizDragHandle({ onMouseDown }) {
         alignItems: 'center',
         justifyContent: 'center',
         touchAction: 'none',
-        position: 'relative',
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = '#0a1a0a'
@@ -34,17 +45,46 @@ function HorizDragHandle({ onMouseDown }) {
         e.currentTarget.querySelector('.grabber').style.opacity = '0.5'
       }}
     >
-      {/* Three green grabber dots */}
-      <div className="grabber" style={{
-        display: 'flex',
-        gap: '4px',
-        opacity: 0.5,
-        transition: 'opacity 0.15s',
-      }}>
+      <div className="grabber" style={{ display: 'flex', gap: '4px', opacity: 0.5, transition: 'opacity 0.15s' }}>
         <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent)' }} />
         <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent)' }} />
         <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent)' }} />
       </div>
+    </div>
+  )
+}
+
+/** Tab header bar */
+function TabBar({ tabs, active, onChange }) {
+  return (
+    <div style={{
+      display: 'flex',
+      gap: '0',
+      background: 'var(--toolbar-bg)',
+      borderBottom: '1px solid var(--border)',
+      flexShrink: 0,
+    }}>
+      {tabs.map((tab) => (
+        <button
+          key={tab}
+          onClick={() => onChange(tab)}
+          style={{
+            padding: '4px 14px',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: active === tab ? '2px solid var(--accent)' : '2px solid transparent',
+            color: active === tab ? 'var(--accent)' : '#444',
+            fontSize: '10px',
+            fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            letterSpacing: '1px',
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+          }}
+        >
+          {tab}
+        </button>
+      ))}
     </div>
   )
 }
@@ -58,19 +98,18 @@ function App() {
   const [generateDone, setGenerateDone] = useState(false)
   const [error, setError] = useState(null)
   const [splitPos, setSplitPos] = useState(50)
-  const [consoleOpen, setConsoleOpen] = useState(true)
-  const [consoleHeight, setConsoleHeight] = useState(100)
-  const [waveformHeight, setWaveformHeight] = useState(280)
   const [prompt, setPrompt] = useState('')
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [sidebarWidth, setSidebarWidth] = useState(280)
-  const [cancelled, setCancelled] = useState(null) // 'generate' | 'simulate' | null
+  const [cancelled, setCancelled] = useState(null)
   const [chatAutoMessage, setChatAutoMessage] = useState(null)
-  const [chatWidth, setChatWidth] = useState(480)
-  const [consoleHidden, setConsoleHidden] = useState(false)
-  const [chatHidden, setChatHidden] = useState(false)
+  const [bottomTab, setBottomTab] = useState('CONSOLE')
+  const [bottomHeight, setBottomHeight] = useState(250)
+  const [rightWidth, setRightWidth] = useState(400)
+  const [rightSplitPos, setRightSplitPos] = useState(50) // % for symbols vs chat
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
+  const designEditorRef = useRef(null)
+
+  // --- Handlers ---
 
   const handleSimulate = useCallback(async () => {
     const controller = new AbortController()
@@ -85,32 +124,19 @@ function App() {
         body: JSON.stringify({ design, testbench }),
         signal: controller.signal,
       })
-      if (!resp.ok) {
-        const detail = await resp.json().catch(() => ({}))
-        throw new Error(detail.detail || `HTTP ${resp.status}`)
-      }
+      if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`) }
       const data = await resp.json()
-      if (!data.success) {
-        setError(data.stderr || 'Compilation failed')
-      }
+      if (!data.success) setError(data.stderr || 'Compilation failed')
       setSimResult(data)
+      if (data.signals?.length) setBottomTab('WAVEFORM')
     } catch (e) {
-      if (e.name === 'AbortError') {
-        setCancelled('simulate')
-        setTimeout(() => setCancelled(null), 2000)
-      } else {
-        setError(e.message)
-      }
+      if (e.name === 'AbortError') { setCancelled('simulate'); setTimeout(() => setCancelled(null), 2000) }
+      else setError(e.message)
       setSimResult(null)
-    } finally {
-      setSimulating(false)
-      simulateControllerRef.current = null
-    }
+    } finally { setSimulating(false); simulateControllerRef.current = null }
   }, [design, testbench])
 
-  const handleCancelSimulate = useCallback(() => {
-    simulateControllerRef.current?.abort()
-  }, [])
+  const handleCancelSimulate = useCallback(() => { simulateControllerRef.current?.abort() }, [])
 
   const handleGenerate = useCallback(async (prompt) => {
     const controller = new AbortController()
@@ -127,147 +153,91 @@ function App() {
         body: JSON.stringify({ prompt }),
         signal: controller.signal,
       })
-      if (!resp.ok) {
-        const detail = await resp.json().catch(() => ({}))
-        throw new Error(detail.detail || `HTTP ${resp.status}`)
-      }
+      if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`) }
       const data = await resp.json()
       setDesign(data.design)
       setTestbench(data.testbench)
       setGenerateDone(true)
       setTimeout(() => setGenerateDone(false), 3000)
-      // Trigger auto-explain in chatbot (unique key to trigger each time)
       setChatAutoMessage(`explain-${Date.now()}`)
+      setBottomTab('DIAGRAM')
     } catch (e) {
-      if (e.name === 'AbortError') {
-        setCancelled('generate')
-        setTimeout(() => setCancelled(null), 2000)
-      } else {
-        setError(e.message)
-      }
-    } finally {
-      setGenerating(false)
-      generateControllerRef.current = null
-    }
+      if (e.name === 'AbortError') { setCancelled('generate'); setTimeout(() => setCancelled(null), 2000) }
+      else setError(e.message)
+    } finally { setGenerating(false); generateControllerRef.current = null }
   }, [])
 
-  const handleCancelGenerate = useCallback(() => {
-    generateControllerRef.current?.abort()
-  }, [])
+  const handleCancelGenerate = useCallback(() => { generateControllerRef.current?.abort() }, [])
 
-  const handleSidebarResizeDown = useCallback((e) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const startWidth = sidebarWidth
-
-    const onMouseMove = (e) => {
-      const delta = e.clientX - startX
-      setSidebarWidth(Math.max(180, Math.min(500, startWidth + delta)))
-    }
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-  }, [sidebarWidth])
-
-  const handleMouseDown = useCallback((e) => {
+  // Editor split
+  const handleEditorSplit = useCallback((e) => {
     e.preventDefault()
     const container = e.target.parentElement
     const rect = container.getBoundingClientRect()
-
     const onMouseMove = (e) => {
       const pct = ((e.clientX - rect.left) / rect.width) * 100
       setSplitPos(Math.max(20, Math.min(80, pct)))
     }
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
+    const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp) }
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
   }, [])
 
-  const handleWaveformResizeDown = useCallback((e) => {
+  // Bottom panel height
+  const handleBottomResize = useCallback((e) => {
     e.preventDefault()
     const startY = e.clientY
-    const startHeight = waveformHeight
-
+    const startH = bottomHeight
     const onMouseMove = (e) => {
       const delta = startY - e.clientY
-      const maxH = window.innerHeight * 0.6
-      setWaveformHeight(Math.max(100, Math.min(maxH, startHeight + delta)))
+      setBottomHeight(Math.max(120, Math.min(window.innerHeight * 0.7, startH + delta)))
     }
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
+    const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp) }
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [waveformHeight])
+  }, [bottomHeight])
 
-  const handleConsoleResizeDown = useCallback((e) => {
-    e.preventDefault()
-    const startY = e.clientY
-    const startHeight = consoleHeight
-
-    const onMouseMove = (e) => {
-      const delta = startY - e.clientY
-      const maxH = window.innerHeight * 0.9
-      setConsoleHeight(Math.max(60, Math.min(maxH, startHeight + delta)))
-    }
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-  }, [consoleHeight])
-
-  const handleChatWidthDown = useCallback((e) => {
+  // Right panel width
+  const handleRightResize = useCallback((e) => {
     e.preventDefault()
     const startX = e.clientX
-    const startWidth = chatWidth
-    const containerWidth = e.target.parentElement?.offsetWidth || window.innerWidth
-
+    const startW = rightWidth
     const onMouseMove = (e) => {
-      const delta = startX - e.clientX  // drag left = wider chat
-      const maxW = containerWidth - 40
-      const newWidth = Math.max(0, Math.min(maxW, startWidth + delta))
-      const consoleRemaining = containerWidth - newWidth - 4 // 4px handle
-
-      if (newWidth < 100) {
-        // Chat dragged very small → hide chat, show full console
-        setChatHidden(true)
-        setConsoleHidden(false)
-        setChatWidth(0)
-      } else if (consoleRemaining < 150) {
-        // Console would be too small → hide console, chat takes full width
-        setConsoleHidden(true)
-        setChatHidden(false)
-        setChatWidth(containerWidth)
-      } else {
-        setConsoleHidden(false)
-        setChatHidden(false)
-        setChatWidth(newWidth)
-      }
+      const delta = startX - e.clientX
+      setRightWidth(Math.max(280, Math.min(700, startW + delta)))
     }
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove)
-      document.removeEventListener('mouseup', onMouseUp)
-    }
+    const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp) }
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [chatWidth])
+  }, [rightWidth])
 
-  const hasConsoleOutput = simResult && (simResult.stdout || simResult.stderr)
-  const hasWaveforms = simResult?.signals?.length > 0
+  // Right panel vertical split (symbols vs chat)
+  const handleRightSplitResize = useCallback((e) => {
+    e.preventDefault()
+    const container = e.target.parentElement
+    const rect = container.getBoundingClientRect()
+    const startY = e.clientY
+    const startPct = rightSplitPos
+    const onMouseMove = (e) => {
+      const pct = ((e.clientY - rect.top) / rect.height) * 100
+      setRightSplitPos(Math.max(15, Math.min(85, pct)))
+    }
+    const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp) }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [rightSplitPos])
+
+  // Insert snippet into design editor
+  const handleInsertSnippet = useCallback((code) => {
+    setDesign((prev) => prev + '\n\n' + code)
+  }, [])
+
   const hasRealCode = (code) => code.replace(/\/\/.*$/gm, '').trim().length > 0
   const canSimulate = hasRealCode(design) && hasRealCode(testbench)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#000' }}>
+      {/* Top: Toolbar */}
       <Toolbar
         onSimulate={handleSimulate}
         onCancelSimulate={handleCancelSimulate}
@@ -282,77 +252,33 @@ function App() {
         cancelled={cancelled}
         canSimulate={canSimulate}
       />
-
-      {/* Progress indicator */}
       <ProgressIndicator active={generating} done={generateDone} />
 
+      {/* Middle: Left area + Right panel */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        <Sidebar
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
-          onSelectExample={setPrompt}
-          width={sidebarWidth}
-        />
-        {!sidebarCollapsed && (
-          <div
-            onMouseDown={handleSidebarResizeDown}
-            style={{
-              width: '4px',
-              cursor: 'col-resize',
-              background: 'var(--border)',
-              flexShrink: 0,
-              transition: 'background 0.15s',
-            }}
-            onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
-            onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
-          />
-        )}
-        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-          {/* Editor split pane */}
-          <div style={{ flex: 1, display: 'flex', position: 'relative', minHeight: 0 }}>
+
+        {/* LEFT AREA */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+
+          {/* Editors */}
+          <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
             <div style={{ width: `${splitPos}%`, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{
-                padding: '4px 12px',
-                background: 'var(--toolbar-bg)',
-                borderBottom: '1px solid var(--border)',
-                fontSize: '11px',
-                color: 'var(--accent)',
-                fontWeight: 500,
-                letterSpacing: '1px',
-                fontFamily: "'JetBrains Mono', monospace",
-              }}>
-                DESIGN
+              <div style={{ padding: '3px 12px', background: 'var(--toolbar-bg)', borderBottom: '1px solid var(--border)', fontSize: '10px', color: 'var(--accent)', fontWeight: 500, letterSpacing: '1px', fontFamily: "'JetBrains Mono', monospace" }}>
+                DESIGN.V
               </div>
               <div style={{ flex: 1, minHeight: 0 }}>
                 <EditorPane value={design} onChange={setDesign} />
               </div>
             </div>
-
             <div
-              onMouseDown={handleMouseDown}
-              style={{
-                width: '2px',
-                cursor: 'col-resize',
-                background: 'var(--border)',
-                flexShrink: 0,
-                transition: 'background 0.15s',
-              }}
+              onMouseDown={handleEditorSplit}
+              style={{ width: '2px', cursor: 'col-resize', background: 'var(--border)', flexShrink: 0, transition: 'background 0.15s' }}
               onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
               onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
             />
-
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{
-                padding: '4px 12px',
-                background: 'var(--toolbar-bg)',
-                borderBottom: '1px solid var(--border)',
-                fontSize: '11px',
-                color: 'var(--accent)',
-                fontWeight: 500,
-                letterSpacing: '1px',
-                fontFamily: "'JetBrains Mono', monospace",
-              }}>
-                TESTBENCH
+              <div style={{ padding: '3px 12px', background: 'var(--toolbar-bg)', borderBottom: '1px solid var(--border)', fontSize: '10px', color: 'var(--accent)', fontWeight: 500, letterSpacing: '1px', fontFamily: "'JetBrains Mono', monospace" }}>
+                TESTBENCH.V
               </div>
               <div style={{ flex: 1, minHeight: 0 }}>
                 <EditorPane value={testbench} onChange={setTestbench} />
@@ -360,158 +286,103 @@ function App() {
             </div>
           </div>
 
-          {/* Waveform drag handle + viewer */}
-          {hasWaveforms && (
-            <>
-              <HorizDragHandle onMouseDown={handleWaveformResizeDown} />
-              <div style={{
-                height: `${waveformHeight}px`,
-                overflow: 'hidden',
-                flexShrink: 0,
-              }}>
-                <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} />
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Bottom panel: Console + Chat side by side */}
-      {(hasConsoleOutput || chatAutoMessage) && (
-        <div style={{
-          background: '#000',
-          flexShrink: 0,
-        }}>
-          {consoleOpen && (
-            <HorizDragHandle onMouseDown={handleConsoleResizeDown} />
-          )}
-          <div
-            onClick={() => setConsoleOpen(!consoleOpen)}
-            style={{
-              padding: '3px 12px',
-              fontSize: '11px',
-              color: 'var(--accent)',
-              fontWeight: 500,
-              fontFamily: "'JetBrains Mono', monospace",
-              background: 'var(--toolbar-bg)',
-              borderBottom: consoleOpen ? '1px solid var(--border)' : 'none',
-              borderTop: consoleOpen ? 'none' : '1px solid var(--border)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              letterSpacing: '1px',
-              userSelect: 'none',
-            }}
-          >
-            <span style={{
-              display: 'inline-block',
-              transform: consoleOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-              transition: 'transform 0.2s',
-              fontSize: '10px',
-            }}>&#9654;</span>
-            CONSOLE &amp; ASSISTANT
-          </div>
-          {consoleOpen && (
-            <div style={{
-              height: `${consoleHeight}px`,
-              display: 'flex',
-              overflow: 'hidden',
-            }}>
-              {/* Console (hidden when chat is full-width) */}
-              {!consoleHidden && (
-                <div style={{
-                  flex: chatHidden ? 1 : (consoleHidden ? 0 : 1),
-                  minWidth: 0,
-                  overflow: 'auto',
-                  padding: '6px 12px',
-                  fontSize: '11px',
-                  fontFamily: "'JetBrains Mono', monospace",
-                  color: 'var(--text-dim)',
-                }}>
+          {/* Bottom tabbed panel */}
+          <HorizDragHandle onMouseDown={handleBottomResize} />
+          <div style={{ height: `${bottomHeight}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <TabBar tabs={['CONSOLE', 'WAVEFORM', 'DIAGRAM', 'EXAMPLES']} active={bottomTab} onChange={setBottomTab} />
+            <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+              {bottomTab === 'CONSOLE' && (
+                <div style={{ height: '100%', overflow: 'auto', padding: '6px 12px', fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-dim)' }}>
                   {simResult?.stderr && <pre style={{ color: 'var(--red)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
                   {simResult?.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{simResult.stdout}</pre>}
                   {!simResult?.stderr && !simResult?.stdout && (
-                    <div style={{ color: '#222', padding: '10px 0' }}>No console output yet.</div>
+                    <div style={{ color: '#222', padding: '20px 0', textAlign: 'center' }}>Run a simulation to see console output</div>
                   )}
                 </div>
               )}
-
-              {/* Restore console button when hidden */}
-              {consoleHidden && (
-                <button
-                  onClick={() => { setConsoleHidden(false); setChatWidth(Math.min(chatWidth, window.innerWidth - 300)); }}
-                  style={{
-                    writingMode: 'vertical-rl',
-                    background: '#050505',
-                    border: 'none',
-                    borderRight: '1px solid var(--border)',
-                    color: 'var(--accent)',
-                    fontSize: '10px',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    cursor: 'pointer',
-                    padding: '8px 3px',
-                    letterSpacing: '1px',
-                    opacity: 0.6,
-                    flexShrink: 0,
-                  }}
-                >
-                  CONSOLE
-                </button>
+              {bottomTab === 'WAVEFORM' && (
+                <div style={{ height: '100%' }}>
+                  {simResult?.signals?.length > 0 ? (
+                    <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} />
+                  ) : (
+                    <div style={{ color: '#222', padding: '20px', textAlign: 'center', fontSize: '11px', fontFamily: "'JetBrains Mono', monospace" }}>
+                      Run a simulation to see waveforms
+                    </div>
+                  )}
+                </div>
               )}
-
-              {/* Chat left-edge drag handle */}
-              <div
-                onMouseDown={handleChatWidthDown}
-                style={{
-                  width: '4px',
-                  cursor: 'col-resize',
-                  background: 'var(--border)',
-                  flexShrink: 0,
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
-                onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
-              />
-
-              {/* Restore chat button when hidden */}
-              {chatHidden && (
-                <button
-                  onClick={() => { setChatHidden(false); setChatWidth(480); }}
-                  style={{
-                    writingMode: 'vertical-rl',
-                    background: '#050505',
-                    border: 'none',
-                    borderLeft: '1px solid var(--border)',
-                    color: 'var(--accent)',
-                    fontSize: '10px',
-                    fontFamily: "'JetBrains Mono', monospace",
-                    cursor: 'pointer',
-                    padding: '8px 3px',
-                    letterSpacing: '1px',
-                    opacity: 0.6,
-                    flexShrink: 0,
-                  }}
-                >
-                  ASSISTANT
-                </button>
+              {bottomTab === 'DIAGRAM' && (
+                <DiagramView design={design} />
               )}
-
-              {/* Chat (hidden when console is full-width) */}
-              {!chatHidden && (
-                <div style={{ width: consoleHidden ? '100%' : `${chatWidth}px`, flexShrink: 0, minWidth: 0 }}>
-                  <ChatBot
-                    design={design}
-                    testbench={testbench}
-                    autoMessage={chatAutoMessage}
-                    simResult={simResult}
-                  />
+              {bottomTab === 'EXAMPLES' && (
+                <div style={{
+                  height: '100%',
+                  overflow: 'auto',
+                  padding: '10px',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                  gap: '6px',
+                  alignContent: 'start',
+                }}>
+                  {EXAMPLES.map((ex, i) => (
+                    <div
+                      key={i}
+                      onClick={() => setPrompt(ex)}
+                      style={{
+                        padding: '8px 12px',
+                        border: '1px solid var(--border)',
+                        borderRadius: '3px',
+                        background: '#050505',
+                        color: '#666',
+                        fontSize: '11px',
+                        fontFamily: "'JetBrains Mono', monospace",
+                        cursor: 'pointer',
+                        transition: 'all 0.1s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = '#001a00' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = '#666'; e.currentTarget.style.background = '#050505' }}
+                    >
+                      {ex}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
-          )}
+          </div>
         </div>
-      )}
+
+        {/* Right panel drag handle */}
+        <div
+          onMouseDown={handleRightResize}
+          style={{ width: '4px', cursor: 'col-resize', background: 'var(--border)', flexShrink: 0, transition: 'background 0.15s' }}
+          onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
+          onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
+        />
+
+        {/* RIGHT AREA: Symbols Library + Chat */}
+        <div style={{ width: `${rightWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          {/* Symbols Library */}
+          <div style={{ height: `${rightSplitPos}%`, overflow: 'hidden' }}>
+            <SymbolsLibrary onInsert={handleInsertSnippet} />
+          </div>
+          {/* Horizontal split handle */}
+          <div
+            onMouseDown={handleRightSplitResize}
+            style={{ height: '4px', cursor: 'row-resize', background: 'var(--border)', flexShrink: 0, transition: 'background 0.15s' }}
+            onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
+            onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
+          />
+          {/* Chat */}
+          <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+            <ChatBot
+              design={design}
+              testbench={testbench}
+              autoMessage={chatAutoMessage}
+              simResult={simResult}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
