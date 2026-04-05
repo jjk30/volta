@@ -1,6 +1,12 @@
 import ChipIcon from './ChipIcon.jsx'
 
-export default function Toolbar({ onSimulate, simulating, error, hasResult, onGenerate, generating, prompt, setPrompt }) {
+export default function Toolbar({
+  onSimulate, onCancelSimulate, simulating,
+  error, hasResult,
+  onGenerate, onCancelGenerate, generating,
+  prompt, setPrompt,
+  cancelled,
+}) {
 
   const handleGenerate = () => {
     if (!prompt.trim() || generating) return
@@ -85,36 +91,65 @@ export default function Toolbar({ onSimulate, simulating, error, hasResult, onGe
             caretColor: 'var(--accent)',
           }}
         />
-        <button
-          onClick={handleGenerate}
-          disabled={generating || !prompt.trim()}
-          style={{
-            padding: '3px 10px',
-            border: '1px solid var(--accent)',
-            borderRadius: '3px',
-            background: 'transparent',
-            color: 'var(--accent)',
-            fontSize: '11px',
-            fontWeight: 600,
-            fontFamily: "'JetBrains Mono', monospace",
-            cursor: generating ? 'wait' : (!prompt.trim() ? 'default' : 'pointer'),
-            opacity: !prompt.trim() && !generating ? 0.4 : 1,
-            transition: 'all 0.15s',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => {
-            if (!generating && prompt.trim()) {
-              e.target.style.background = 'var(--accent)'
+        {generating ? (
+          <button
+            onClick={onCancelGenerate}
+            style={{
+              padding: '3px 10px',
+              border: '1px solid #ff4444',
+              borderRadius: '3px',
+              background: 'transparent',
+              color: '#ff4444',
+              fontSize: '11px',
+              fontWeight: 600,
+              fontFamily: "'JetBrains Mono', monospace",
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.background = '#ff4444'
               e.target.style.color = '#000'
-            }
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.background = 'transparent'
-            e.target.style.color = 'var(--accent)'
-          }}
-        >
-          {generating ? 'GENERATING...' : 'GENERATE'}
-        </button>
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'transparent'
+              e.target.style.color = '#ff4444'
+            }}
+          >
+            CANCEL
+          </button>
+        ) : (
+          <button
+            onClick={handleGenerate}
+            disabled={!prompt.trim()}
+            style={{
+              padding: '3px 10px',
+              border: '1px solid var(--accent)',
+              borderRadius: '3px',
+              background: 'transparent',
+              color: 'var(--accent)',
+              fontSize: '11px',
+              fontWeight: 600,
+              fontFamily: "'JetBrains Mono', monospace",
+              cursor: !prompt.trim() ? 'default' : 'pointer',
+              opacity: !prompt.trim() ? 0.4 : 1,
+              transition: 'all 0.15s',
+              flexShrink: 0,
+            }}
+            onMouseEnter={(e) => {
+              if (prompt.trim()) {
+                e.target.style.background = 'var(--accent)'
+                e.target.style.color = '#000'
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = 'transparent'
+              e.target.style.color = 'var(--accent)'
+            }}
+          >
+            GENERATE
+          </button>
+        )}
       </div>
 
       <div style={{
@@ -124,51 +159,83 @@ export default function Toolbar({ onSimulate, simulating, error, hasResult, onGe
         flexShrink: 0,
       }} />
 
-      <button
-        onClick={onSimulate}
-        disabled={simulating}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '5px',
-          padding: '4px 12px',
-          border: '1px solid var(--accent)',
-          borderRadius: '3px',
-          background: 'transparent',
-          color: 'var(--accent)',
-          fontSize: '12px',
-          fontWeight: 600,
-          fontFamily: "'JetBrains Mono', monospace",
-          cursor: simulating ? 'wait' : 'pointer',
-          transition: 'all 0.15s',
-          flexShrink: 0,
-          opacity: simulating ? 0.6 : 1,
-        }}
-        onMouseEnter={(e) => {
-          if (!simulating) {
+      {simulating ? (
+        <button
+          onClick={onCancelSimulate}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            padding: '4px 12px',
+            border: '1px solid #ff4444',
+            borderRadius: '3px',
+            background: 'transparent',
+            color: '#ff4444',
+            fontSize: '12px',
+            fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
+            e.target.style.background = '#ff4444'
+            e.target.style.color = '#000'
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.background = 'transparent'
+            e.target.style.color = '#ff4444'
+          }}
+        >
+          CANCEL
+        </button>
+      ) : (
+        <button
+          onClick={onSimulate}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            padding: '4px 12px',
+            border: '1px solid var(--accent)',
+            borderRadius: '3px',
+            background: 'transparent',
+            color: 'var(--accent)',
+            fontSize: '12px',
+            fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => {
             e.target.style.background = 'var(--accent)'
             e.target.style.color = '#000'
-          }
-        }}
-        onMouseLeave={(e) => {
-          e.target.style.background = 'transparent'
-          e.target.style.color = 'var(--accent)'
-        }}
-      >
-        {simulating ? (
-          <>
-            <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>&#8635;</span>
-            SIM...
-          </>
-        ) : (
-          <>
-            <span style={{ fontSize: '11px' }}>&#9654;</span>
-            SIMULATE
-          </>
-        )}
-      </button>
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.background = 'transparent'
+            e.target.style.color = 'var(--accent)'
+          }}
+        >
+          <span style={{ fontSize: '11px' }}>&#9654;</span>
+          SIMULATE
+        </button>
+      )}
 
-      {error && (
+      {/* Status area */}
+      {cancelled && (
+        <div style={{
+          fontSize: '11px',
+          color: '#ff4444',
+          fontFamily: "'JetBrains Mono', monospace",
+          flexShrink: 0,
+          opacity: 0.8,
+        }}>
+          Cancelled
+        </div>
+      )}
+
+      {error && !cancelled && (
         <div style={{
           fontSize: '11px',
           color: 'var(--red)',
@@ -183,7 +250,7 @@ export default function Toolbar({ onSimulate, simulating, error, hasResult, onGe
         </div>
       )}
 
-      {!error && hasResult && (
+      {!error && !cancelled && hasResult && (
         <div style={{
           fontSize: '11px',
           color: 'var(--accent)',
