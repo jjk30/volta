@@ -66,7 +66,7 @@ function App() {
   const [sidebarWidth, setSidebarWidth] = useState(280)
   const [cancelled, setCancelled] = useState(null) // 'generate' | 'simulate' | null
   const [chatAutoMessage, setChatAutoMessage] = useState(null)
-  const [bottomSplitPos, setBottomSplitPos] = useState(60) // console takes 60%, chat 40%
+  const [chatWidth, setChatWidth] = useState(480)
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
 
@@ -223,14 +223,14 @@ function App() {
     document.addEventListener('mouseup', onMouseUp)
   }, [consoleHeight])
 
-  const handleBottomSplitDown = useCallback((e) => {
+  const handleChatWidthDown = useCallback((e) => {
     e.preventDefault()
-    const container = e.target.parentElement
-    const rect = container.getBoundingClientRect()
+    const startX = e.clientX
+    const startWidth = chatWidth
 
     const onMouseMove = (e) => {
-      const pct = ((e.clientX - rect.left) / rect.width) * 100
-      setBottomSplitPos(Math.max(20, Math.min(80, pct)))
+      const delta = startX - e.clientX  // drag left = wider chat
+      setChatWidth(Math.max(300, Math.min(800, startWidth + delta)))
     }
     const onMouseUp = () => {
       document.removeEventListener('mousemove', onMouseMove)
@@ -238,7 +238,7 @@ function App() {
     }
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [])
+  }, [chatWidth])
 
   const hasConsoleOutput = simResult && (simResult.stdout || simResult.stderr)
   const hasWaveforms = simResult?.signals?.length > 0
@@ -399,13 +399,13 @@ function App() {
             }}>
               {/* Console */}
               <div style={{
-                width: `${bottomSplitPos}%`,
+                flex: 1,
+                minWidth: 0,
                 overflow: 'auto',
                 padding: '6px 12px',
                 fontSize: '11px',
                 fontFamily: "'JetBrains Mono', monospace",
                 color: 'var(--text-dim)',
-                borderRight: '1px solid var(--border)',
               }}>
                 {simResult?.stderr && <pre style={{ color: 'var(--red)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
                 {simResult?.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{simResult.stdout}</pre>}
@@ -414,9 +414,9 @@ function App() {
                 )}
               </div>
 
-              {/* Vertical drag handle */}
+              {/* Chat left-edge drag handle */}
               <div
-                onMouseDown={handleBottomSplitDown}
+                onMouseDown={handleChatWidthDown}
                 style={{
                   width: '4px',
                   cursor: 'col-resize',
@@ -429,7 +429,7 @@ function App() {
               />
 
               {/* Chat */}
-              <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ width: `${chatWidth}px`, flexShrink: 0, minWidth: 0 }}>
                 <ChatBot
                   design={design}
                   testbench={testbench}
