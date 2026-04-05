@@ -313,6 +313,78 @@ async def generate(req: GenerateRequest):
     )
 
 
+# ---------------------------------------------------------------------------
+# Chat endpoint — hardware design assistant
+# ---------------------------------------------------------------------------
+
+CHAT_SYSTEM_PROMPT = """You are Volta's hardware design assistant. You help users understand and improve their Verilog designs. You can explain how the design works, suggest optimizations, identify bugs, compare architectures, and answer questions about hardware/VLSI/semiconductor concepts.
+
+You ONLY help with topics in: electrical engineering, computer engineering, computer science, ECE, VLSI, semiconductors, hardware design, Verilog/VHDL/SystemVerilog, digital logic, FPGAs, ASICs, chip design, and math relevant to these fields.
+
+For any off-topic questions (cooking, sports, entertainment, general life advice, etc.), respond exactly with: 'Sorry, I cannot help you with this. I only assist with hardware design and related engineering topics.'
+
+Keep responses concise and technical. Use Verilog code examples when helpful. Format responses in plain text with line breaks for readability."""
+
+
+class ChatMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    design: str = ""
+    testbench: str = ""
+    history: list[ChatMessage] = []
+
+
+class ChatResponse(BaseModel):
+    response: str
+
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(req: ChatRequest):
+    """Chat with Volta's hardware design assistant."""
+
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message is empty")
+
+    # Build context with current design code
+    context_parts = [CHAT_SYSTEM_PROMPT]
+    if req.design.strip():
+        context_parts.append(f"\nCurrent Verilog design:\n```verilog\n{req.design}\n```")
+    if req.testbench.strip():
+        context_parts.append(f"\nCurrent testbench:\n```verilog\n{req.testbench}\n```")
+
+    system_context = "\n".join(context_parts)
+
+    # Build conversation for Ollama
+    # Ollama's /api/generate uses a single prompt, so we flatten history
+    conversation = system_context + "\n\n"
+    for msg in req.history:
+        prefix = "User" if msg.role == "user" else "Assistant"
+        conversation += f"{prefix}: {msg.content}\n\n"
+    conversation += f"User: {req.message}\n\nAssistant:"
+
+    try:
+        import requests as http_requests
+        resp = http_requests.post("http://localhost:11434/api/generate", json={
+            "model": "codellama:7b",
+            "prompt": conversation,
+            "stream": False,
+            "options": {"temperature": 0.3, "num_predict": 2048},
+        }, timeout=120)
+        resp.raise_for_status()
+        reply = resp.json()["response"].strip()
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Chat failed: {e}. Is Ollama running?",
+        )
+
+    return ChatResponse(response=reply)
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
