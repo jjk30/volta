@@ -1,8 +1,6 @@
-import { useState } from 'react'
 import ChipIcon from './ChipIcon.jsx'
 
-export default function Toolbar({ onSimulate, simulating, error, hasResult, onGenerate, generating }) {
-  const [prompt, setPrompt] = useState('')
+export default function Toolbar({ onSimulate, simulating, error, hasResult, onGenerate, generating, prompt, setPrompt }) {
 
   const handleGenerate = () => {
     if (!prompt.trim() || generating) return
