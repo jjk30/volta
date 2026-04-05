@@ -3,6 +3,12 @@ import ReactMarkdown from 'react-markdown'
 
 const API_URL = 'http://localhost:8000'
 
+/** Convert triple-backtick short identifiers to single-backtick inline code.
+ *  ```clk``` → `clk`, but leave multi-line code blocks alone. */
+function fixInlineCode(text) {
+  return text.replace(/```([^`\n]{1,30})```/g, '`$1`')
+}
+
 function ThinkingDots() {
   return (
     <span style={{ display: 'inline-flex', gap: '3px', alignItems: 'center' }}>
@@ -164,6 +170,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
               msg.content
             ) : (
               <ReactMarkdown
+                children={fixInlineCode(msg.content)}
                 components={{
                   strong: ({ children }) => (
                     <strong style={{ color: 'var(--accent)', fontWeight: 600 }}>{children}</strong>
@@ -199,9 +206,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
                     <li style={{ margin: '2px 0' }}>{children}</li>
                   ),
                 }}
-              >
-                {msg.content}
-              </ReactMarkdown>
+              />
             )}
           </div>
         ))}
