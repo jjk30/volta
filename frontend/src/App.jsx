@@ -62,6 +62,7 @@ function App() {
   const [waveformHeight, setWaveformHeight] = useState(280)
   const [prompt, setPrompt] = useState('')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(280)
   const [cancelled, setCancelled] = useState(null) // 'generate' | 'simulate' | null
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
@@ -147,6 +148,23 @@ function App() {
     generateControllerRef.current?.abort()
   }, [])
 
+  const handleSidebarResizeDown = useCallback((e) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = sidebarWidth
+
+    const onMouseMove = (e) => {
+      const delta = e.clientX - startX
+      setSidebarWidth(Math.max(180, Math.min(500, startWidth + delta)))
+    }
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [sidebarWidth])
+
   const handleMouseDown = useCallback((e) => {
     e.preventDefault()
     const container = e.target.parentElement
@@ -227,7 +245,22 @@ function App() {
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           onSelectExample={setPrompt}
+          width={sidebarWidth}
         />
+        {!sidebarCollapsed && (
+          <div
+            onMouseDown={handleSidebarResizeDown}
+            style={{
+              width: '4px',
+              cursor: 'col-resize',
+              background: 'var(--border)',
+              flexShrink: 0,
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
+            onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
+          />
+        )}
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
           {/* Editor split pane */}
           <div style={{ flex: 1, display: 'flex', position: 'relative', minHeight: 0 }}>

@@ -65,7 +65,7 @@ function SectionHeader({ children }) {
   )
 }
 
-export default function Sidebar({ collapsed, onToggle, onSelectExample }) {
+export default function Sidebar({ collapsed, onToggle, onSelectExample, width = 280 }) {
   const [hoveredExample, setHoveredExample] = useState(null)
 
   if (collapsed) {
@@ -101,9 +101,8 @@ export default function Sidebar({ collapsed, onToggle, onSelectExample }) {
 
   return (
     <div style={{
-      width: '260px',
+      width: `${width}px`,
       background: '#050505',
-      borderRight: '1px solid var(--border)',
       display: 'flex',
       flexDirection: 'column',
       flexShrink: 0,
