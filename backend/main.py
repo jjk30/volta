@@ -359,6 +359,40 @@ SHORT_INSTRUCTION = (
 )
 
 
+def _truncate_to_sentences(text: str, max_sentences: int = 2) -> str:
+    """Hard-truncate text to the first N sentences.
+
+    Strips code blocks before counting so fenced code doesn't eat
+    the sentence budget. Splits on sentence-ending punctuation (. ! ?).
+    """
+
+    # Remove code blocks to avoid counting sentences inside them
+    code_blocks = []
+    stripped = text
+    for m in re.finditer(r'```.*?```', text, re.DOTALL):
+        code_blocks.append(m.group())
+        stripped = stripped.replace(m.group(), ' __CODE_BLOCK__ ', 1)
+
+    # Split on sentence-ending punctuation followed by whitespace or end
+    parts = re.split(r'(?<=[.!?])\s+', stripped.strip())
+    if len(parts) <= max_sentences:
+        return text  # already short enough
+
+    # Take first N sentences
+    truncated = " ".join(parts[:max_sentences])
+
+    # Ensure it ends with punctuation
+    if truncated and truncated[-1] not in ".!?":
+        truncated += "."
+
+    # Restore any code blocks that fell within the kept sentences
+    for block in code_blocks:
+        if "__CODE_BLOCK__" in truncated:
+            truncated = truncated.replace("__CODE_BLOCK__", block, 1)
+
+    return truncated.strip()
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     """Chat with Volta's hardware design assistant."""
@@ -368,7 +402,7 @@ async def chat(req: ChatRequest):
 
     # Detect if user wants a short response
     wants_short = bool(SHORT_KEYWORDS.search(req.message))
-    max_tokens = 150 if wants_short else 800
+    max_tokens = 80 if wants_short else 800
 
     # Build context with current design code
     context_parts = [CHAT_SYSTEM_PROMPT]
@@ -407,6 +441,10 @@ async def chat(req: ChatRequest):
             status_code=502,
             detail=f"Chat failed: {e}. Is Ollama running?",
         )
+
+    # Hard-truncate to 2 sentences when short mode is requested
+    if wants_short:
+        reply = _truncate_to_sentences(reply, max_sentences=2)
 
     return ChatResponse(response=reply)
 
