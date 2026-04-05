@@ -139,33 +139,54 @@ def _fix_verilog(verilog: str) -> str:
 
 
 def _fix_reg_declarations(verilog: str) -> str:
-    """Fix outputs used in always blocks but not declared as reg."""
+    """Fix outputs used in always blocks but not declared as reg.
 
-    lines = verilog.split("\n")
+    Parses the full port list (single-line or multi-line) to find output
+    ports declared without reg (e.g. 'output wire [3:0] out' or just
+    'output [3:0] out'). Then scans always blocks for procedural
+    assignments to those signals and changes their declarations to
+    'output reg'.
+    """
 
-    output_names = set()
-    output_reg_names = set()
-    for line in lines:
-        stripped = line.strip().rstrip(",").rstrip(");")
-        m = re.match(r"output\s+reg\s+(?:\[[\d:]+\]\s+)?(\w+)", stripped)
+    # Step 1: Extract full port list and find non-reg outputs
+    port_list_match = re.search(r'module\s+\w+\s*\((.*?)\)\s*;', verilog, re.DOTALL)
+    if not port_list_match:
+        return verilog
+
+    port_list_text = port_list_match.group(1)
+    output_no_reg = set()  # outputs that need reg added
+    output_reg = set()     # outputs already declared as reg
+
+    for port_decl in port_list_text.split(","):
+        port_decl = port_decl.strip()
+        # Already has reg — skip
+        m = re.match(r'output\s+reg\s+(?:\[[\d:]+\]\s+)?(\w+)', port_decl)
         if m:
-            output_reg_names.add(m.group(1))
+            output_reg.add(m.group(1))
             continue
-        m = re.match(r"output\s+(?:\[[\d:]+\]\s+)?(\w+)", stripped)
+        # output wire [...] name  OR  output [...] name
+        m = re.match(r'output\s+(?:wire\s+)?(?:\[[\d:]+\]\s+)?(\w+)', port_decl)
         if m:
-            output_names.add(m.group(1))
+            output_no_reg.add(m.group(1))
 
+    if not output_no_reg:
+        return verilog
+
+    # Step 2: Scan always blocks for assignments to those outputs
+    lines = verilog.split("\n")
     in_always = False
     always_depth = 0
     needs_reg = set()
+
     for line in lines:
         stripped = line.strip()
-        if re.match(r"always\s+@", stripped):
+        if re.match(r'always\s+@', stripped):
             in_always = True
             always_depth = 0
         if in_always:
             always_depth += stripped.count("begin") - stripped.count("end")
-            for name in output_names:
+            for name in output_no_reg:
+                # Match: name = ..., name <= ..., or {name, ...} = ...
                 if re.search(rf'\b{re.escape(name)}\b\s*<?=', stripped):
                     needs_reg.add(name)
                 if re.search(rf'\{{\s*{re.escape(name)}\b', stripped):
@@ -176,12 +197,21 @@ def _fix_reg_declarations(verilog: str) -> str:
     if not needs_reg:
         return verilog
 
+    # Step 3: Replace declarations — handle both multi-line and single-line
     new_lines = []
     for line in lines:
+        modified = False
         for name in needs_reg:
-            pattern = r"(\s*output\s+)(\[[\d:]+\]\s+)?" + re.escape(name) + r"\b"
-            if re.match(pattern, line.rstrip(",").rstrip(");")) and "reg" not in line:
-                line = line.replace("output ", "output reg ", 1)
+            # Match: output wire [W:0] name  or  output [W:0] name  or  output name
+            pattern = r'(output\s+)wire\s+(\[[\d:]+\]\s+)?' + re.escape(name) + r'\b'
+            if re.search(pattern, line) and 'reg' not in line:
+                line = re.sub(r'output\s+wire\s+', 'output reg ', line, count=1)
+                modified = True
+                break
+            pattern = r'(output\s+)(\[[\d:]+\]\s+)?' + re.escape(name) + r'\b'
+            if re.search(pattern, line) and 'reg' not in line and 'wire' not in line:
+                line = re.sub(r'output\s+', 'output reg ', line, count=1)
+                modified = True
                 break
         new_lines.append(line)
 
