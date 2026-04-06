@@ -394,7 +394,7 @@ class ChatRequest(BaseModel):
     testbench: str = ""
     history: list[ChatMessage] = []
     simulation: Optional[SimulationData] = None
-    selectedSymbol: Optional[SelectedSymbolData] = None
+    selectedSymbols: list[SelectedSymbolData] = []
 
 
 class ChatResponse(BaseModel):
@@ -600,20 +600,21 @@ async def chat(req: ChatRequest):
         sim_summary = _build_simulation_summary(req.simulation)
         context_parts.append(f"\n{sim_summary}")
 
-    # Inject truth table context if a symbol with truth table is selected
-    if req.selectedSymbol and req.selectedSymbol.truthTable and req.selectedSymbol.truthTable.headers:
-        tt = req.selectedSymbol.truthTable
-        tt_lines = [" | ".join(tt.headers)]
-        for row in tt.rows:
-            tt_lines.append(" | ".join(row))
-        tt_text = "\n".join(tt_lines)
-        context_parts.append(
-            f"\nThe user is working with a {req.selectedSymbol.name}. "
-            f"The truth table for this component is:\n{tt_text}\n"
-            f"When explaining the generated Verilog or answering questions, "
-            f"reference this truth table to verify the logic is correct. "
-            f"Explain how the Verilog code implements each row of the truth table."
-        )
+    # Inject truth table context for selected symbols
+    for sym in (req.selectedSymbols or []):
+        if sym.truthTable and sym.truthTable.headers:
+            tt = sym.truthTable
+            tt_lines = [" | ".join(tt.headers)]
+            for row in tt.rows:
+                tt_lines.append(" | ".join(row))
+            tt_text = "\n".join(tt_lines)
+            context_parts.append(
+                f"\nThe user is working with a {sym.name}. "
+                f"The truth table for this component is:\n{tt_text}\n"
+                f"When explaining the generated Verilog or answering questions, "
+                f"reference this truth table to verify the logic is correct. "
+                f"Explain how the Verilog code implements each row of the truth table."
+            )
 
     system_context = "\n".join(context_parts)
 
