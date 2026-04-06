@@ -52,7 +52,7 @@ Rules:
 Return ONLY Verilog. Start with `module` and end with `endmodule`. No explanation."""
 
 
-def call_ollama(prompt: str, model: str = "rtlcoder") -> str:
+def call_ollama(prompt: str, model: str = "qwen2.5-coder:7b") -> str:
     """Send a prompt to the local Ollama server."""
 
     resp = requests.post("http://localhost:11434/api/generate", json={

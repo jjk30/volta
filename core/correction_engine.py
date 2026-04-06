@@ -175,7 +175,7 @@ Rules:
 # Ollama interface
 # ---------------------------------------------------------------------------
 
-def call_ollama(prompt: str, model: str = "rtlcoder") -> str:
+def call_ollama(prompt: str, model: str = "qwen2.5-coder:7b") -> str:
     """Send a prompt to the local Ollama server."""
 
     try:
@@ -231,7 +231,7 @@ MAX_ATTEMPTS = 5
 
 def correct(
     verilog: str,
-    model: str = "rtlcoder",
+    model: str = "qwen2.5-coder:7b",
     max_attempts: int = MAX_ATTEMPTS,
 ) -> dict:
     """
