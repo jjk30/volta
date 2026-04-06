@@ -555,10 +555,20 @@ def _fix_input_assignments(verilog: str) -> str:
             in_always = True
         if in_always:
             for name in input_ports:
-                # Match: name = ..., name <= ..., or {name, ...} = ...
-                if re.search(rf'\b{re.escape(name)}\b\s*<?=', stripped):
-                    assigned_inputs.add(name)
-                if re.search(rf'\{{\s*{re.escape(name)}\b', stripped):
+                # Match procedural assignment: name = ... or name <= ...
+                # But NOT comparisons: name == ..., name != ..., name >= ..., name <= (comparison)
+                # Use negative lookahead to exclude ==, !=, >=
+                if re.search(rf'\b{re.escape(name)}\b\s*<=(?!=)', stripped):
+                    # Non-blocking assignment (but not <=  as comparison)
+                    # Distinguish: if it's on LHS (start of statement), it's assignment
+                    if re.match(rf'\s*{re.escape(name)}\b\s*<=', stripped):
+                        assigned_inputs.add(name)
+                elif re.search(rf'\b{re.escape(name)}\b\s*=(?![=>])', stripped):
+                    # Blocking assignment: name = ... but not == or =>
+                    if re.match(rf'\s*{re.escape(name)}\b\s*=(?![=>])', stripped):
+                        assigned_inputs.add(name)
+                # Concatenation on LHS: {name, ...} = ...
+                if re.search(rf'\{{\s*{re.escape(name)}\b.*\}}\s*<?=', stripped):
                     assigned_inputs.add(name)
         if stripped == "endmodule":
             in_always = False
