@@ -227,9 +227,13 @@ function App() {
     document.addEventListener('mouseup', onMouseUp)
   }, [rightSplitPos])
 
-  // Insert snippet into design editor
+  // Insert snippet into design editor at cursor position
   const handleInsertSnippet = useCallback((code) => {
-    setDesign((prev) => prev + '\n\n' + code)
+    if (designEditorRef.current?.insertAtCursor) {
+      designEditorRef.current.insertAtCursor(code)
+    } else {
+      setDesign((prev) => prev + '\n\n' + code)
+    }
   }, [])
 
   const hasRealCode = (code) => code.replace(/\/\/.*$/gm, '').trim().length > 0
@@ -267,7 +271,7 @@ function App() {
                 DESIGN.V
               </div>
               <div style={{ flex: 1, minHeight: 0 }}>
-                <EditorPane value={design} onChange={setDesign} />
+                <EditorPane ref={designEditorRef} value={design} onChange={setDesign} />
               </div>
             </div>
             <div

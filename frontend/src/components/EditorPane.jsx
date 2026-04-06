@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react'
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -8,11 +8,26 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { verilog } from '@codemirror/legacy-modes/mode/verilog'
 import { oneDark } from './oneDarkTheme.js'
 
-export default function EditorPane({ value, onChange }) {
+const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
   const containerRef = useRef(null)
   const viewRef = useRef(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+
+  // Expose insertAtCursor to parent via ref
+  useImperativeHandle(ref, () => ({
+    insertAtCursor(text) {
+      const view = viewRef.current
+      if (!view) return
+      const pos = view.state.selection.main.head
+      const insert = '\n' + text + '\n'
+      view.dispatch({
+        changes: { from: pos, insert },
+        selection: { anchor: pos + insert.length },
+      })
+      view.focus()
+    },
+  }))
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -76,4 +91,6 @@ export default function EditorPane({ value, onChange }) {
   }, [value])
 
   return <div ref={containerRef} style={{ height: '100%', overflow: 'hidden' }} />
-}
+})
+
+export default EditorPane
