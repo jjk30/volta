@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { CATEGORIES, SYMBOLS } from '../symbolsData.js'
 
-export default function SymbolsLibrary({ onInsert }) {
+export default function SymbolsLibrary({ onSelectSymbol }) {
   const [activeCategory, setActiveCategory] = useState('Logic Gates')
   const [hovered, setHovered] = useState(null)
   const [ttState, setTtState] = useState(null) // { symId, table, x, y } or null
@@ -116,7 +116,7 @@ export default function SymbolsLibrary({ onInsert }) {
         textAlign: 'center',
         flexShrink: 0,
       }}>
-        Click symbol to insert code &bull; Click TT for truth table
+        Click symbol to load prompt &bull; Click TT for truth table
       </div>
 
       {/* Symbol grid */}
@@ -189,7 +189,7 @@ export default function SymbolsLibrary({ onInsert }) {
 
               {/* SVG container */}
               <div
-                onClick={() => { if (!isTTOpen) onInsert(sym.verilog) }}
+                onClick={() => { if (!isTTOpen) onSelectSymbol(sym) }}
                 style={{
                   flex: 1,
                   minHeight: 0,
@@ -206,7 +206,7 @@ export default function SymbolsLibrary({ onInsert }) {
               />
               {/* Name */}
               <div
-                onClick={() => { if (!isTTOpen) onInsert(sym.verilog) }}
+                onClick={() => { if (!isTTOpen) onSelectSymbol(sym) }}
                 style={{
                   height: '24px',
                   flexShrink: 0,

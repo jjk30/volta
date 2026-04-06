@@ -105,6 +105,7 @@ function App() {
   const [bottomHeight, setBottomHeight] = useState(250)
   const [rightWidth, setRightWidth] = useState(400)
   const [rightSplitPos, setRightSplitPos] = useState(50) // % for symbols vs chat
+  const [lastSelectedSymbol, setLastSelectedSymbol] = useState(null)
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
   const designEditorRef = useRef(null)
@@ -227,13 +228,10 @@ function App() {
     document.addEventListener('mouseup', onMouseUp)
   }, [rightSplitPos])
 
-  // Insert snippet into design editor at cursor position
-  const handleInsertSnippet = useCallback((code) => {
-    if (designEditorRef.current?.insertAtCursor) {
-      designEditorRef.current.insertAtCursor(code)
-    } else {
-      setDesign((prev) => prev + '\n\n' + code)
-    }
+  // Symbol click: populate prompt bar with symbol's natural-language prompt
+  const handleSelectSymbol = useCallback((symbol) => {
+    setPrompt(symbol.promptText || symbol.name)
+    setLastSelectedSymbol(symbol)
   }, [])
 
   const hasRealCode = (code) => code.replace(/\/\/.*$/gm, '').trim().length > 0
@@ -367,7 +365,7 @@ function App() {
         <div style={{ width: `${rightWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {/* Symbols Library */}
           <div style={{ height: `${rightSplitPos}%`, overflow: 'hidden' }}>
-            <SymbolsLibrary onInsert={handleInsertSnippet} />
+            <SymbolsLibrary onSelectSymbol={handleSelectSymbol} />
           </div>
           {/* Horizontal split handle */}
           <div
@@ -383,6 +381,7 @@ function App() {
               testbench={testbench}
               autoMessage={chatAutoMessage}
               simResult={simResult}
+              lastSelectedSymbol={lastSelectedSymbol}
             />
           </div>
         </div>
