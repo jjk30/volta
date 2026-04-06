@@ -81,7 +81,7 @@ function ThinkingDots() {
   )
 }
 
-export default function ChatBot({ design, testbench, autoMessage, simResult, lastSelectedSymbol }) {
+export default function ChatBot({ design, testbench, autoMessage, simResult, selectedSymbols = [] }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -127,11 +127,13 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, las
             stdout: simResult.stdout || '',
             stderr: simResult.stderr || '',
           } : null,
-          selectedSymbol: lastSelectedSymbol ? {
-            name: lastSelectedSymbol.name,
-            promptText: lastSelectedSymbol.promptText,
-            truthTable: lastSelectedSymbol.truthTable || null,
-          } : null,
+          selectedSymbols: selectedSymbols
+            .filter((s) => s.truthTable)
+            .map((s) => ({
+              name: s.name,
+              promptText: s.promptText,
+              truthTable: s.truthTable,
+            })),
         }),
       })
       if (!resp.ok) {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import Toolbar from './components/Toolbar.jsx'
 import EditorPane from './components/EditorPane.jsx'
 import WaveformViewer from './components/WaveformViewer.jsx'
@@ -105,7 +105,8 @@ function App() {
   const [bottomHeight, setBottomHeight] = useState(250)
   const [rightWidth, setRightWidth] = useState(400)
   const [rightSplitPos, setRightSplitPos] = useState(50) // % for symbols vs chat
-  const [lastSelectedSymbol, setLastSelectedSymbol] = useState(null)
+  const [selectedSymbols, setSelectedSymbols] = useState([])
+  const [autoPrompt, setAutoPrompt] = useState('') // tracks auto-generated prompt for disconnect detection
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
   const designEditorRef = useRef(null)
@@ -228,11 +229,42 @@ function App() {
     document.addEventListener('mouseup', onMouseUp)
   }, [rightSplitPos])
 
-  // Symbol click: populate prompt bar with symbol's natural-language prompt
+  // Symbol click: toggle in selectedSymbols array
   const handleSelectSymbol = useCallback((symbol) => {
-    setPrompt(symbol.promptText || symbol.name)
-    setLastSelectedSymbol(symbol)
+    setSelectedSymbols((prev) => {
+      const exists = prev.find((s) => s.id === symbol.id)
+      if (exists) return prev.filter((s) => s.id !== symbol.id)
+      return [...prev, symbol]
+    })
   }, [])
+
+  const handleClearSymbols = useCallback(() => {
+    setSelectedSymbols([])
+    setPrompt('')
+    setAutoPrompt('')
+  }, [])
+
+  // Build composite prompt from selectedSymbols
+  useEffect(() => {
+    let text = ''
+    if (selectedSymbols.length === 1) {
+      text = selectedSymbols[0].promptText || selectedSymbols[0].name
+    } else if (selectedSymbols.length > 1) {
+      const names = selectedSymbols.map((s) => s.promptText?.replace(/^Design (a |an )?/i, '') || s.name)
+      text = `Design a circuit that combines: ${names.join(', ')}. Connect them appropriately to form a working circuit.`
+    }
+    setAutoPrompt(text)
+    setPrompt(text)
+  }, [selectedSymbols])
+
+  // Disconnect: if user manually edits prompt to differ from auto, clear symbols
+  const handlePromptChange = useCallback((val) => {
+    setPrompt(val)
+    if (autoPrompt && val !== autoPrompt) {
+      setSelectedSymbols([])
+      setAutoPrompt('')
+    }
+  }, [autoPrompt])
 
   const hasRealCode = (code) => code.replace(/\/\/.*$/gm, '').trim().length > 0
   const canSimulate = hasRealCode(design) && hasRealCode(testbench)
@@ -250,7 +282,7 @@ function App() {
         onCancelGenerate={handleCancelGenerate}
         generating={generating}
         prompt={prompt}
-        setPrompt={setPrompt}
+        setPrompt={handlePromptChange}
         cancelled={cancelled}
         canSimulate={canSimulate}
       />
@@ -365,7 +397,11 @@ function App() {
         <div style={{ width: `${rightWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           {/* Symbols Library */}
           <div style={{ height: `${rightSplitPos}%`, overflow: 'hidden' }}>
-            <SymbolsLibrary onSelectSymbol={handleSelectSymbol} />
+            <SymbolsLibrary
+              onSelectSymbol={handleSelectSymbol}
+              selectedIds={selectedSymbols.map((s) => s.id)}
+              onClear={handleClearSymbols}
+            />
           </div>
           {/* Horizontal split handle */}
           <div
@@ -381,7 +417,7 @@ function App() {
               testbench={testbench}
               autoMessage={chatAutoMessage}
               simResult={simResult}
-              lastSelectedSymbol={lastSelectedSymbol}
+              selectedSymbols={selectedSymbols}
             />
           </div>
         </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { CATEGORIES, SYMBOLS } from '../symbolsData.js'
 
-export default function SymbolsLibrary({ onSelectSymbol }) {
+export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onClear }) {
   const [activeCategory, setActiveCategory] = useState('Logic Gates')
   const [hovered, setHovered] = useState(null)
   const [ttState, setTtState] = useState(null) // { symId, table, x, y } or null
@@ -107,7 +107,7 @@ export default function SymbolsLibrary({ onSelectSymbol }) {
         ))}
       </div>
 
-      {/* Hint */}
+      {/* Hint + Clear */}
       <div style={{
         padding: '3px 8px',
         fontSize: '9px',
@@ -115,8 +115,27 @@ export default function SymbolsLibrary({ onSelectSymbol }) {
         fontStyle: 'italic',
         textAlign: 'center',
         flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '6px',
       }}>
-        Click symbol to load prompt &bull; Click TT for truth table
+        <span>Click symbols to build circuit &bull; TT for truth table</span>
+        {selectedIds.length > 0 && (
+          <span
+            onClick={onClear}
+            style={{
+              color: '#ff4444',
+              cursor: 'pointer',
+              fontStyle: 'normal',
+              fontWeight: 600,
+              fontSize: '8px',
+              letterSpacing: '0.5px',
+            }}
+          >
+            CLEAR ({selectedIds.length})
+          </span>
+        )}
       </div>
 
       {/* Symbol grid */}
@@ -132,6 +151,7 @@ export default function SymbolsLibrary({ onSelectSymbol }) {
         {symbols.map((sym) => {
           const isHovered = hovered === sym.id
           const isTTOpen = ttState?.symId === sym.id
+          const isSelected = selectedIds.includes(sym.id)
           return (
             <div
               key={sym.id}
@@ -141,8 +161,8 @@ export default function SymbolsLibrary({ onSelectSymbol }) {
                 height: '160px',
                 padding: '8px',
                 borderRadius: '4px',
-                border: `1px solid ${isHovered || isTTOpen ? 'var(--accent)' : '#1a1a1a'}`,
-                background: isHovered ? '#001a00' : '#0a0a0a',
+                border: isSelected ? '2px solid #00ff41' : `1px solid ${isHovered || isTTOpen ? 'var(--accent)' : '#1a1a1a'}`,
+                background: isSelected ? '#001a00' : (isHovered ? '#001a00' : '#0a0a0a'),
                 cursor: 'pointer',
                 transition: 'all 0.15s',
                 boxShadow: isHovered ? '0 0 8px #00ff4120' : 'none',
@@ -152,6 +172,28 @@ export default function SymbolsLibrary({ onSelectSymbol }) {
                 overflow: 'hidden',
               }}
             >
+              {/* Selected checkmark badge */}
+              {isSelected && (
+                <div style={{
+                  position: 'absolute',
+                  top: '3px',
+                  left: '3px',
+                  width: '16px',
+                  height: '16px',
+                  borderRadius: '50%',
+                  background: '#00ff41',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '10px',
+                  color: '#000',
+                  fontWeight: 700,
+                  zIndex: 2,
+                }}>
+                  &#10003;
+                </div>
+              )}
+
               {/* TT button */}
               {sym.truthTable && (
                 <div
