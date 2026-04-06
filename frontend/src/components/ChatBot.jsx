@@ -127,13 +127,11 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
             stdout: simResult.stdout || '',
             stderr: simResult.stderr || '',
           } : null,
-          selectedSymbols: selectedSymbols
-            .filter((s) => s.truthTable)
-            .map((s) => ({
-              name: s.name,
-              promptText: s.promptText,
-              truthTable: s.truthTable,
-            })),
+          selectedSymbols: (selectedSymbols || []).map((s) => ({
+            name: s.name,
+            promptText: s.promptText || '',
+            truthTable: s.truthTable || null,
+          })),
         }),
       })
       if (!resp.ok) {

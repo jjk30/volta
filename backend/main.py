@@ -360,6 +360,61 @@ OFF_TOPIC_KEYWORDS = re.compile(
 )
 
 
+# Functional descriptions for symbols WITHOUT truth tables
+SYMBOL_DESCRIPTIONS = {
+    "alu": "ALU: performs arithmetic (add, sub) and logic (AND, OR) operations on two N-bit inputs based on an opcode",
+    "shifter": "Barrel Shifter: shifts input left or right by a specified amount in one clock cycle",
+    "reg": "Register: stores N-bit data, updates on clock edge when enable is high",
+    "ram": "RAM: read/write memory addressed by addr, synchronous write on clock edge with write enable",
+    "rom": "ROM: read-only memory, output = stored data at address input",
+    "regfile": "Register File: multiple registers with read/write ports, synchronous write, combinational read",
+    "pc": "Program Counter: increments by instruction size on each clock, resets to 0",
+    "ctrl": "Control Unit: decodes opcode into control signals for datapath",
+    "imem": "Instruction Memory: combinational read, outputs instruction at program counter address",
+    "dmem": "Data Memory: synchronous write, combinational or synchronous read",
+    "sext": "Sign Extend: replicates MSB to fill upper bits, preserving signed value",
+    "clkgen": "Clock Generator: produces periodic clock signal by toggling output",
+    "mux8": "8:1 Multiplexer: selects one of 8 inputs based on 3-bit select",
+    "demux2": "1:2 Demultiplexer: routes single input to one of 2 outputs based on select",
+    "demux4": "1:4 Demultiplexer: routes single input to one of 4 outputs based on 2-bit select",
+    "prienc": "Priority Encoder: outputs binary index of highest-priority active input",
+}
+
+# Behavior rules for symbol validation
+SYMBOL_BEHAVIOR_RULES = {
+    "and": "AND gate: output = boolean AND of all inputs. No sequential logic. All inputs must be declared.",
+    "or": "OR gate: output = boolean OR of all inputs. No sequential logic.",
+    "not": "NOT gate: output = boolean complement of input. Single input only.",
+    "nand": "NAND gate: output = NOT(AND(inputs)). No sequential logic.",
+    "nor": "NOR gate: output = NOT(OR(inputs)). No sequential logic.",
+    "xor": "XOR gate: output = exclusive OR. No sequential logic.",
+    "xnor": "XNOR gate: output = NOT(XOR(inputs)). No sequential logic.",
+    "buffer": "Buffer: output = input. No inversion.",
+    "tristate": "Tri-state buffer: output = input when enable high, high-Z when enable low.",
+    "mux2": "2:1 MUX: output = in0 when sel=0, in1 when sel=1. Purely combinational.",
+    "mux4": "4:1 MUX: output = selected input based on 2-bit select. Purely combinational.",
+    "dff": "D flip-flop: Q follows D on clock edge. Must have clock input. Reset optional but must be async/sync as specified.",
+    "jkff": "JK flip-flop: J=K=0 hold, J=0 K=1 reset, J=1 K=0 set, J=K=1 toggle. Must have clock.",
+    "tff": "T flip-flop: T=0 hold, T=1 toggle. Must have clock.",
+    "srlatch": "SR latch: S=1 sets Q, R=1 resets Q, S=R=1 is invalid.",
+    "dec24": "2:4 Decoder: one-hot output based on 2-bit input address.",
+    "fulladd": "Full Adder: {cout, sum} = a + b + cin. Purely combinational.",
+    "halfadd": "Half Adder: sum = a XOR b, cout = a AND b. Purely combinational.",
+    "cmp": "Comparator: gt=(a>b), eq=(a==b), lt=(a<b). Purely combinational.",
+    "alu": "ALU: requires two operands and an opcode. Output depends on opcode. Needs operand sources.",
+    "ram": "RAM: requires address, data input, write enable, and clock for synchronous write.",
+    "rom": "ROM: requires address input. Read-only, no write port.",
+    "regfile": "Register File: requires read/write addresses, write data, write enable, and clock.",
+    "pc": "Program Counter: sequential, increments on clock edge. Needs clock and reset.",
+    "reg": "Register: sequential, stores data on clock edge when enable is high. Needs clock.",
+}
+
+VALIDATION_KEYWORDS = re.compile(
+    r'\b(explain|correct|work|valid|truth.?table|check|verify|logic|wrong|bug|error|fix|issue)\b',
+    re.I,
+)
+
+
 class ChatMessage(BaseModel):
     role: str  # "user" or "assistant"
     content: str
@@ -583,7 +638,9 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Message is empty")
 
     # Pre-Ollama keyword filter: refuse off-topic questions immediately
-    if OFF_TOPIC_KEYWORDS.search(req.message):
+    # Bypass when user has hardware context (selected symbols or design code)
+    has_hw_context = bool(req.selectedSymbols) or bool(req.design.strip())
+    if not has_hw_context and OFF_TOPIC_KEYWORDS.search(req.message):
         return ChatResponse(response=OFF_TOPIC_REFUSAL)
 
     # Detect if user wants a short response
@@ -600,20 +657,63 @@ async def chat(req: ChatRequest):
         sim_summary = _build_simulation_summary(req.simulation)
         context_parts.append(f"\n{sim_summary}")
 
-    # Inject truth table context for selected symbols
-    for sym in (req.selectedSymbols or []):
-        if sym.truthTable and sym.truthTable.headers:
-            tt = sym.truthTable
-            tt_lines = [" | ".join(tt.headers)]
-            for row in tt.rows:
-                tt_lines.append(" | ".join(row))
-            tt_text = "\n".join(tt_lines)
+    # Inject context for ALL selected symbols
+    selected = req.selectedSymbols or []
+    if selected:
+        sym_names = [s.name for s in selected]
+        context_parts.append(f"\nSelected components: {', '.join(sym_names)}")
+
+        for sym in selected:
+            sym_id = sym.name.lower().replace(' ', '').replace('-', '')
+            # Try to find matching id in behavior rules
+            rule_id = None
+            for rid in SYMBOL_BEHAVIOR_RULES:
+                if rid in sym_id or sym_id in rid:
+                    rule_id = rid
+                    break
+
+            if sym.truthTable and sym.truthTable.headers:
+                # Symbol with truth table: include formatted table
+                tt = sym.truthTable
+                tt_lines = [" | ".join(tt.headers)]
+                tt_lines.append(" | ".join(["---"] * len(tt.headers)))
+                for row in tt.rows:
+                    tt_lines.append(" | ".join(row))
+                tt_text = "\n".join(tt_lines)
+                context_parts.append(
+                    f"\n{sym.name} truth table:\n{tt_text}"
+                )
+            else:
+                # Symbol without truth table: include functional description
+                desc = None
+                for did, dtxt in SYMBOL_DESCRIPTIONS.items():
+                    if did in sym_id or sym_id in did:
+                        desc = dtxt
+                        break
+                if desc:
+                    context_parts.append(f"\n{sym.name}: {desc}")
+
+            # Include behavior rules
+            if rule_id and rule_id in SYMBOL_BEHAVIOR_RULES:
+                context_parts.append(f"Rule for {sym.name}: {SYMBOL_BEHAVIOR_RULES[rule_id]}")
+
+        # Validation directive when user asks about correctness
+        if VALIDATION_KEYWORDS.search(req.message):
             context_parts.append(
-                f"\nThe user is working with a {sym.name}. "
-                f"The truth table for this component is:\n{tt_text}\n"
-                f"When explaining the generated Verilog or answering questions, "
-                f"reference this truth table to verify the logic is correct. "
-                f"Explain how the Verilog code implements each row of the truth table."
+                f"\nVALIDATION MODE: The user has selected these components: {', '.join(sym_names)}. "
+                f"When responding:\n"
+                f"1. First, check if the combination forms a coherent circuit. If not, explain why and suggest fixes.\n"
+                f"2. Second, verify the generated Verilog matches the expected behavior of each component "
+                f"using truth tables where available, or standard functional behavior otherwise.\n"
+                f"3. Be explicit: say 'CORRECT' or 'INCORRECT' for each claim. Don't be vague.\n"
+                f"4. If the design is illogical or mathematically wrong, say so directly — do not pretend it works.\n"
+                f"5. Check: sequential elements (flip-flops, counters, registers, RAM) need a clock source. "
+                f"ALU needs operand sources. Memory needs addressing logic."
+            )
+        else:
+            context_parts.append(
+                f"\nWhen explaining, reference truth tables to verify logic and explain "
+                f"how the Verilog implements each component's expected behavior."
             )
 
     system_context = "\n".join(context_parts)
@@ -677,16 +777,18 @@ async def chat(req: ChatRequest):
     reply = reply.strip()
 
     # Post-Ollama filter: if the model answered an off-topic question anyway,
-    # override with refusal. Heuristic: if reply is long and doesn't mention
-    # any hardware terms, it's likely off-topic.
-    hw_terms = re.compile(
-        r'\b(verilog|module|wire|reg|signal|clock|reset|flip.?flop|gate|'
-        r'register|counter|alu|mux|fpga|asic|rtl|synthesis|testbench|'
-        r'simulation|waveform|port|bit|bus|latch|combinational|sequential)\b',
-        re.I,
-    )
-    if len(reply) > 50 and not hw_terms.search(reply):
-        reply = OFF_TOPIC_REFUSAL
+    # override with refusal. Skip when hardware context exists.
+    if not has_hw_context:
+        hw_terms = re.compile(
+            r'\b(verilog|module|wire|reg|signal|clock|reset|flip.?flop|gate|'
+            r'register|counter|alu|mux|fpga|asic|rtl|synthesis|testbench|'
+            r'simulation|waveform|port|bit|bus|latch|combinational|sequential|'
+            r'truth.?table|logic|circuit|decoder|encoder|memory|ram|rom|'
+            r'schematic|timing|correct|incorrect)\b',
+            re.I,
+        )
+        if len(reply) > 50 and not hw_terms.search(reply):
+            reply = OFF_TOPIC_REFUSAL
 
     # Hard-truncate to 2 sentences when short mode is requested
     if wants_short:
