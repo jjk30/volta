@@ -103,7 +103,7 @@ export default function SymbolsLibrary({ onInsert }) {
         overflow: 'auto',
         padding: '6px',
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+        gridTemplateColumns: 'repeat(2, 1fr)',
         gap: '6px',
         alignContent: 'start',
       }}>
@@ -116,7 +116,8 @@ export default function SymbolsLibrary({ onInsert }) {
               onMouseEnter={() => setHovered(sym.id)}
               onMouseLeave={() => setHovered(null)}
               style={{
-                padding: '6px',
+                height: '160px',
+                padding: '8px',
                 borderRadius: '4px',
                 border: `1px solid ${isHovered || isTTOpen ? 'var(--accent)' : '#1a1a1a'}`,
                 background: isHovered ? '#001a00' : '#0a0a0a',
@@ -125,9 +126,8 @@ export default function SymbolsLibrary({ onInsert }) {
                 boxShadow: isHovered ? '0 0 8px #00ff4120' : 'none',
                 display: 'flex',
                 flexDirection: 'column',
-                alignItems: 'center',
-                gap: '4px',
                 position: 'relative',
+                overflow: 'hidden',
               }}
             >
               {/* TT button — only if symbol has a truth table */}
@@ -137,8 +137,8 @@ export default function SymbolsLibrary({ onInsert }) {
                   onMouseDown={(e) => e.stopPropagation()}
                   style={{
                     position: 'absolute',
-                    top: '3px',
-                    right: '3px',
+                    top: '4px',
+                    right: '4px',
                     width: '22px',
                     height: '18px',
                     display: 'flex',
@@ -165,30 +165,37 @@ export default function SymbolsLibrary({ onInsert }) {
                 </div>
               )}
 
-              {/* SVG preview — clicking this inserts snippet */}
+              {/* SVG container — fixed height, scales SVG to fit */}
               <div
                 onClick={(e) => { if (!isTTOpen) onInsert(sym.verilog) }}
                 style={{
-                  width: '100%',
-                  height: '80px',
+                  flex: 1,
+                  minHeight: 0,
+                  maxHeight: '115px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
+                  overflow: 'hidden',
                 }}
                 dangerouslySetInnerHTML={{
-                  __html: sym.svg(isHovered ? '#00ff41' : '#00cc33'),
+                  __html: sym.svg(isHovered ? '#00ff41' : '#00cc33')
+                    .replace(/<svg /, '<svg style="width:100%;height:100%;max-width:100%;max-height:110px" preserveAspectRatio="xMidYMid meet" '),
                 }}
               />
-              {/* Name */}
+              {/* Name — fixed bottom area */}
               <div
                 onClick={() => { if (!isTTOpen) onInsert(sym.verilog) }}
                 style={{
+                  height: '24px',
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   fontSize: '9px',
                   fontWeight: 600,
                   color: isHovered ? 'var(--accent)' : '#666',
                   textTransform: 'uppercase',
                   letterSpacing: '0.5px',
-                  textAlign: 'center',
                 }}
               >
                 {sym.name}
