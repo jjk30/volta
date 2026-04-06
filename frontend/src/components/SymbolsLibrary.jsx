@@ -1,103 +1,47 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { CATEGORIES, SYMBOLS } from '../symbolsData.js'
-
-/** Truth table popover rendered near the clicked symbol card. */
-function TruthTablePopover({ table, anchorRect, onClose }) {
-  const ref = useRef(null)
-
-  // Close on click outside or Escape
-  useEffect(() => {
-    const handleClick = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) onClose()
-    }
-    const handleKey = (e) => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('mousedown', handleClick)
-    document.addEventListener('keydown', handleKey)
-    return () => {
-      document.removeEventListener('mousedown', handleClick)
-      document.removeEventListener('keydown', handleKey)
-    }
-  }, [onClose])
-
-  if (!table) return null
-
-  // Position near anchor — below and slightly right
-  const style = {
-    position: 'fixed',
-    left: Math.min(anchorRect.left, window.innerWidth - 300),
-    top: Math.min(anchorRect.bottom + 4, window.innerHeight - 250),
-    zIndex: 1000,
-    background: '#0a0a0a',
-    border: '1px solid #1a4a1a',
-    borderRadius: '4px',
-    padding: '8px',
-    fontFamily: "'JetBrains Mono', monospace",
-    fontSize: '10px',
-    boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
-    maxWidth: '320px',
-    maxHeight: '220px',
-    overflow: 'auto',
-  }
-
-  return (
-    <div ref={ref} style={style}>
-      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
-        <thead>
-          <tr>
-            {table.headers.map((h, i) => (
-              <th key={i} style={{
-                padding: '3px 8px',
-                borderBottom: '1px solid #1a4a1a',
-                color: '#00ff41',
-                fontWeight: 600,
-                textAlign: 'center',
-                whiteSpace: 'nowrap',
-              }}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {table.rows.map((row, i) => (
-            <tr key={i}>
-              {row.map((cell, j) => (
-                <td key={j} style={{
-                  padding: '2px 8px',
-                  borderBottom: i < table.rows.length - 1 ? '1px solid #111' : 'none',
-                  color: '#00cc33',
-                  textAlign: 'center',
-                  whiteSpace: 'nowrap',
-                }}>
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
 
 export default function SymbolsLibrary({ onInsert }) {
   const [activeCategory, setActiveCategory] = useState('Logic Gates')
   const [hovered, setHovered] = useState(null)
-  const [ttOpen, setTtOpen] = useState(null) // { symbolId, table, rect }
+  const [openTT, setOpenTT] = useState(null) // symbol id or null
+  const popoverRef = useRef(null)
 
   const symbols = SYMBOLS[activeCategory] || []
 
-  const handleTTClick = (e, sym) => {
-    e.stopPropagation()
-    if (ttOpen?.symbolId === sym.id) {
-      setTtOpen(null)
-    } else {
-      const rect = e.currentTarget.getBoundingClientRect()
-      setTtOpen({ symbolId: sym.id, table: sym.truthTable, rect })
+  // Close popover on Escape or click outside
+  useEffect(() => {
+    if (!openTT) return
+
+    const handleKey = (e) => {
+      if (e.key === 'Escape') setOpenTT(null)
     }
-  }
+    const handleClick = (e) => {
+      // Delay check so the opening click doesn't immediately close
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        setOpenTT(null)
+      }
+    }
+
+    document.addEventListener('keydown', handleKey)
+    // Use setTimeout so the current click event doesn't trigger close
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handleClick)
+    }, 50)
+
+    return () => {
+      document.removeEventListener('keydown', handleKey)
+      document.removeEventListener('mousedown', handleClick)
+      clearTimeout(timer)
+    }
+  }, [openTT])
+
+  const handleTTClick = useCallback((e, symId) => {
+    e.stopPropagation()
+    e.preventDefault()
+    console.log('[Volta] TT clicked:', symId, 'current:', openTT)
+    setOpenTT((prev) => prev === symId ? null : symId)
+  }, [openTT])
 
   return (
     <div style={{
@@ -133,7 +77,7 @@ export default function SymbolsLibrary({ onInsert }) {
         {CATEGORIES.map((cat) => (
           <button
             key={cat}
-            onClick={() => { setActiveCategory(cat); setTtOpen(null) }}
+            onClick={() => { setActiveCategory(cat); setOpenTT(null) }}
             style={{
               padding: '4px 8px',
               background: 'transparent',
@@ -146,7 +90,6 @@ export default function SymbolsLibrary({ onInsert }) {
               cursor: 'pointer',
               whiteSpace: 'nowrap',
               flexShrink: 0,
-              transition: 'all 0.15s',
             }}
           >
             {cat}
@@ -166,16 +109,16 @@ export default function SymbolsLibrary({ onInsert }) {
       }}>
         {symbols.map((sym) => {
           const isHovered = hovered === sym.id
+          const isTTOpen = openTT === sym.id
           return (
             <div
               key={sym.id}
-              onClick={() => onInsert(sym.verilog)}
               onMouseEnter={() => setHovered(sym.id)}
               onMouseLeave={() => setHovered(null)}
               style={{
                 padding: '6px',
                 borderRadius: '4px',
-                border: `1px solid ${isHovered ? 'var(--accent)' : '#1a1a1a'}`,
+                border: `1px solid ${isHovered || isTTOpen ? 'var(--accent)' : '#1a1a1a'}`,
                 background: isHovered ? '#001a00' : '#0a0a0a',
                 cursor: 'pointer',
                 transition: 'all 0.15s',
@@ -189,42 +132,42 @@ export default function SymbolsLibrary({ onInsert }) {
             >
               {/* TT button — only if symbol has a truth table */}
               {sym.truthTable && (
-                <button
-                  onClick={(e) => handleTTClick(e, sym)}
+                <div
+                  onClick={(e) => handleTTClick(e, sym.id)}
+                  onMouseDown={(e) => e.stopPropagation()}
                   style={{
                     position: 'absolute',
                     top: '3px',
                     right: '3px',
-                    width: '20px',
-                    height: '16px',
-                    padding: '0',
-                    border: `1px solid ${ttOpen?.symbolId === sym.id ? 'var(--accent)' : '#333'}`,
+                    width: '22px',
+                    height: '18px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: `1px solid ${isTTOpen ? 'var(--accent)' : '#333'}`,
                     borderRadius: '2px',
-                    background: ttOpen?.symbolId === sym.id ? '#001a00' : 'transparent',
-                    color: ttOpen?.symbolId === sym.id ? 'var(--accent)' : '#555',
+                    background: isTTOpen ? '#001a00' : '#111',
+                    color: isTTOpen ? 'var(--accent)' : '#555',
                     fontSize: '8px',
                     fontWeight: 700,
                     fontFamily: "'JetBrains Mono', monospace",
                     cursor: 'pointer',
-                    lineHeight: '14px',
-                    transition: 'all 0.15s',
-                    zIndex: 1,
+                    zIndex: 2,
+                    userSelect: 'none',
                   }}
                   onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
                   onMouseLeave={(e) => {
-                    if (ttOpen?.symbolId !== sym.id) {
-                      e.currentTarget.style.borderColor = '#333'
-                      e.currentTarget.style.color = '#555'
-                    }
+                    if (!isTTOpen) { e.currentTarget.style.borderColor = '#333'; e.currentTarget.style.color = '#555' }
                   }}
                   title="Show truth table"
                 >
                   TT
-                </button>
+                </div>
               )}
 
-              {/* SVG preview */}
+              {/* SVG preview — clicking this inserts snippet */}
               <div
+                onClick={(e) => { if (!isTTOpen) onInsert(sym.verilog) }}
                 style={{
                   width: '100%',
                   height: '80px',
@@ -237,29 +180,86 @@ export default function SymbolsLibrary({ onInsert }) {
                 }}
               />
               {/* Name */}
-              <div style={{
-                fontSize: '9px',
-                fontWeight: 600,
-                color: isHovered ? 'var(--accent)' : '#666',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-                textAlign: 'center',
-              }}>
+              <div
+                onClick={() => { if (!isTTOpen) onInsert(sym.verilog) }}
+                style={{
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  color: isHovered ? 'var(--accent)' : '#666',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  textAlign: 'center',
+                }}
+              >
                 {sym.name}
               </div>
+
+              {/* Truth table popover — inside the card, absolutely positioned */}
+              {isTTOpen && sym.truthTable && (
+                <div
+                  ref={popoverRef}
+                  onClick={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: '0',
+                    marginTop: '4px',
+                    zIndex: 100,
+                    background: '#0a0a0a',
+                    border: '1px solid #1a4a1a',
+                    borderRadius: '4px',
+                    padding: '8px',
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '10px',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
+                    minWidth: '120px',
+                    maxWidth: '320px',
+                    maxHeight: '220px',
+                    overflow: 'auto',
+                  }}
+                >
+                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                    <thead>
+                      <tr>
+                        {sym.truthTable.headers.map((h, i) => (
+                          <th key={i} style={{
+                            padding: '3px 8px',
+                            borderBottom: '1px solid #1a4a1a',
+                            color: '#00ff41',
+                            fontWeight: 600,
+                            textAlign: 'center',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sym.truthTable.rows.map((row, i) => (
+                        <tr key={i}>
+                          {row.map((cell, j) => (
+                            <td key={j} style={{
+                              padding: '2px 8px',
+                              borderBottom: i < sym.truthTable.rows.length - 1 ? '1px solid #111' : 'none',
+                              color: '#00cc33',
+                              textAlign: 'center',
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )
         })}
       </div>
-
-      {/* Truth table popover */}
-      {ttOpen && (
-        <TruthTablePopover
-          table={ttOpen.table}
-          anchorRect={ttOpen.rect}
-          onClose={() => setTtOpen(null)}
-        />
-      )}
     </div>
   )
 }
