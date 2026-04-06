@@ -3,10 +3,13 @@ import { EditorState } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { bracketMatching, indentOnInput, StreamLanguage } from '@codemirror/language'
-import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete'
+import { closeBrackets, closeBracketsKeymap, autocompletion } from '@codemirror/autocomplete'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
+import { linter } from '@codemirror/lint'
 import { verilog } from '@codemirror/legacy-modes/mode/verilog'
 import { oneDark } from './oneDarkTheme.js'
+import { verilogLint } from './verilogLinter.js'
+import { verilogCompletion } from './verilogComplete.js'
 
 const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
   const containerRef = useRef(null)
@@ -52,6 +55,17 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
         StreamLanguage.define(verilog),
         oneDark,
         updateListener,
+
+        // Verilog linter — 500ms debounce
+        linter(verilogLint, { delay: 500 }),
+
+        // Verilog autocomplete — trigger after 2 chars or Ctrl+Space
+        autocompletion({
+          override: [verilogCompletion],
+          activateOnTyping: true,
+          maxRenderedOptions: 20,
+        }),
+
         keymap.of([
           ...defaultKeymap,
           ...historyKeymap,
@@ -60,6 +74,52 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
         ]),
         EditorView.theme({
           '&': { height: '100%' },
+          // Lint underline styling
+          '.cm-lintRange-error': {
+            backgroundImage: 'none',
+            textDecoration: 'underline wavy #ff4444',
+            textUnderlineOffset: '3px',
+          },
+          '.cm-lintRange-warning': {
+            backgroundImage: 'none',
+            textDecoration: 'underline wavy #ffaa00',
+            textUnderlineOffset: '3px',
+          },
+          // Lint gutter markers
+          '.cm-lint-marker-error': { color: '#ff4444' },
+          '.cm-lint-marker-warning': { color: '#ffaa00' },
+          // Lint tooltip
+          '.cm-tooltip-lint': {
+            backgroundColor: '#0a0a0a',
+            border: '1px solid #1a4a1a',
+            color: '#ccc',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '11px',
+          },
+          // Autocomplete popup
+          '.cm-tooltip-autocomplete': {
+            backgroundColor: '#0a0a0a !important',
+            border: '1px solid #1a4a1a !important',
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: '11px',
+          },
+          '.cm-tooltip-autocomplete > ul': {
+            fontFamily: "'JetBrains Mono', monospace",
+          },
+          '.cm-tooltip-autocomplete > ul > li': {
+            color: '#888',
+            padding: '2px 8px',
+          },
+          '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
+            backgroundColor: '#001a00 !important',
+            color: '#00ff41 !important',
+          },
+          // Completion icons by type
+          '.cm-completionIcon-keyword::after': { content: '"K"', color: '#00ff41' },
+          '.cm-completionIcon-variable::after': { content: '"S"', color: '#4ec9b0' },
+          '.cm-completionIcon-text::after': { content: '">"', color: '#d4a017' },
+          '.cm-completionDetail': { color: '#444', marginLeft: '8px', fontStyle: 'italic' },
+          '.cm-completionLabel': { color: '#ccc' },
         }),
       ],
     })
