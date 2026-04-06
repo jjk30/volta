@@ -35,6 +35,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = a & b;`,
+      truthTable: { headers: ['A','B','Y'], rows: [['0','0','0'],['0','1','0'],['1','0','0'],['1','1','1']] },
     },
     {
       name: 'OR',
@@ -47,6 +48,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = a | b;`,
+      truthTable: { headers: ['A','B','Y'], rows: [['0','0','0'],['0','1','1'],['1','0','1'],['1','1','1']] },
     },
     {
       name: 'NOT',
@@ -59,6 +61,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'a', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = ~a;`,
+      truthTable: { headers: ['A','Y'], rows: [['0','1'],['1','0']] },
     },
     {
       name: 'NAND',
@@ -72,6 +75,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = ~(a & b);`,
+      truthTable: { headers: ['A','B','Y'], rows: [['0','0','1'],['0','1','1'],['1','0','1'],['1','1','0']] },
     },
     {
       name: 'NOR',
@@ -85,6 +89,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = ~(a | b);`,
+      truthTable: { headers: ['A','B','Y'], rows: [['0','0','1'],['0','1','0'],['1','0','0'],['1','1','0']] },
     },
     {
       name: 'XOR',
@@ -98,6 +103,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = a ^ b;`,
+      truthTable: { headers: ['A','B','Y'], rows: [['0','0','0'],['0','1','1'],['1','0','1'],['1','1','0']] },
     },
     {
       name: 'XNOR',
@@ -112,6 +118,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = ~(a ^ b);`,
+      truthTable: { headers: ['A','B','Y'], rows: [['0','0','1'],['0','1','0'],['1','0','0'],['1','1','1']] },
     },
     {
       name: 'Buffer',
@@ -123,6 +130,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'a', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = a;`,
+      truthTable: { headers: ['A','Y'], rows: [['0','0'],['1','1']] },
     },
     {
       name: 'Tri-state',
@@ -135,6 +143,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'a', c)}${lbl(107, 52, 'y', c)}${lbl(55, 14, 'en', c)}
       </svg>`,
       verilog: `assign y = en ? a : 1'bz;`,
+      truthTable: { headers: ['EN','A','Y'], rows: [['0','X','Z'],['1','0','0'],['1','1','1']] },
     },
   ],
 
@@ -151,6 +160,7 @@ export const SYMBOLS = {
         ${lbl(2, 33, 'in0', c)}${lbl(2, 63, 'in1', c)}${lbl(107, 52, 'out', c)}${lbl(58, 95, 'sel', c)}
       </svg>`,
       verilog: `assign out = sel ? in1 : in0;`,
+      truthTable: { headers: ['S','Y'], rows: [['0','I0'],['1','I1']] },
     },
     {
       name: '4:1 MUX',
@@ -167,6 +177,7 @@ export const SYMBOLS = {
         ${lbl(107, 52, 'out', c)}${lbl(53, 98, 'sel', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case (sel)\n    2'b00: out = in0;\n    2'b01: out = in1;\n    2'b10: out = in2;\n    2'b11: out = in3;\n    default: out = 0;\n  endcase\nend`,
+      truthTable: { headers: ['S1','S0','Y'], rows: [['0','0','I0'],['0','1','I1'],['1','0','I2'],['1','1','I3']] },
     },
     {
       name: '8:1 MUX',
@@ -238,6 +249,7 @@ export const SYMBOLS = {
         ${lbl(2, 33, 'a', c)}${lbl(2, 48, 'b', c)}${lbl(2, 63, 'cin', c)}${lbl(112, 38, 'sum', c)}${lbl(112, 58, 'cout', c)}
       </svg>`,
       verilog: `assign {cout, sum} = a + b + cin;`,
+      truthTable: { headers: ['A','B','Cin','S','Cout'], rows: [['0','0','0','0','0'],['0','0','1','1','0'],['0','1','0','1','0'],['0','1','1','0','1'],['1','0','0','1','0'],['1','0','1','0','1'],['1','1','0','0','1'],['1','1','1','1','1']] },
     },
     {
       name: 'Half Adder',
@@ -252,6 +264,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(112, 38, 'sum', c)}${lbl(112, 58, 'cout', c)}
       </svg>`,
       verilog: `assign sum = a ^ b;\nassign cout = a & b;`,
+      truthTable: { headers: ['A','B','S','Cout'], rows: [['0','0','0','0'],['0','1','1','0'],['1','0','1','0'],['1','1','0','1']] },
     },
     {
       name: 'Comparator',
@@ -267,6 +280,7 @@ export const SYMBOLS = {
         ${lbl(2, 33, 'a', c)}${lbl(2, 63, 'b', c)}${lbl(112, 28, 'gt', c)}${lbl(112, 48, 'eq', c)}${lbl(112, 68, 'lt', c)}
       </svg>`,
       verilog: `assign gt = (a > b);\nassign eq = (a == b);\nassign lt = (a < b);`,
+      truthTable: { headers: ['A vs B','gt','eq','lt'], rows: [['A>B','1','0','0'],['A=B','0','1','0'],['A<B','0','0','1']] },
     },
     {
       name: 'Shifter',
@@ -296,6 +310,7 @@ export const SYMBOLS = {
         ${lbl(28, 38, 'D', c)}${lbl(80, 38, 'Q', c, 'end')}${lbl(2, 33, 'd', c)}${lbl(2, 78, 'clk', c)}${lbl(112, 38, 'q', c)}
       </svg>`,
       verilog: `always @(posedge clk)\n  q <= d;`,
+      truthTable: { headers: ['CLK','D','Q(next)'], rows: [['↑','0','0'],['↑','1','1'],['0','X','Q']] },
     },
     {
       name: 'JK Flip-Flop',
@@ -311,6 +326,7 @@ export const SYMBOLS = {
         ${lbl(2, 28, 'j', c)}${lbl(2, 48, 'k', c)}${lbl(2, 78, 'clk', c)}${lbl(112, 38, 'q', c)}
       </svg>`,
       verilog: `always @(posedge clk) begin\n  case ({j, k})\n    2'b00: q <= q;\n    2'b01: q <= 1'b0;\n    2'b10: q <= 1'b1;\n    2'b11: q <= ~q;\n  endcase\nend`,
+      truthTable: { headers: ['J','K','Q(next)'], rows: [['0','0','Q'],['0','1','0'],['1','0','1'],['1','1','~Q']] },
     },
     {
       name: 'T Flip-Flop',
@@ -324,6 +340,7 @@ export const SYMBOLS = {
         ${lbl(28, 38, 'T', c)}${lbl(80, 38, 'Q', c, 'end')}${lbl(2, 33, 't', c)}${lbl(2, 78, 'clk', c)}${lbl(112, 38, 'q', c)}
       </svg>`,
       verilog: `always @(posedge clk)\n  if (t) q <= ~q;`,
+      truthTable: { headers: ['T','Q(next)'], rows: [['0','Q'],['1','~Q']] },
     },
     {
       name: 'SR Latch',
@@ -337,6 +354,7 @@ export const SYMBOLS = {
         ${lbl(2, 33, 's', c)}${lbl(2, 63, 'r', c)}${lbl(112, 52, 'q', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case ({s, r})\n    2'b10: q = 1'b1;\n    2'b01: q = 1'b0;\n    2'b00: q = q;\n    default: q = 1'bx;\n  endcase\nend`,
+      truthTable: { headers: ['S','R','Q(next)'], rows: [['0','0','Q'],['0','1','0'],['1','0','1'],['1','1','?']] },
     },
   ],
 
@@ -497,6 +515,7 @@ export const SYMBOLS = {
         ${lbl(107, 23, 'y0', c)}${lbl(107, 40, 'y1', c)}${lbl(107, 56, 'y2', c)}${lbl(107, 73, 'y3', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case (a)\n    2'b00: y = 4'b0001;\n    2'b01: y = 4'b0010;\n    2'b10: y = 4'b0100;\n    2'b11: y = 4'b1000;\n    default: y = 4'b0000;\n  endcase\nend`,
+      truthTable: { headers: ['A1','A0','Y3','Y2','Y1','Y0'], rows: [['0','0','0','0','0','1'],['0','1','0','0','1','0'],['1','0','0','1','0','0'],['1','1','1','0','0','0']] },
     },
     {
       name: 'Priority Enc',
