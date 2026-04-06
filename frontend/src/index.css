@@ -69,6 +69,45 @@ html, body, #root {
   background: rgba(0, 255, 65, 0.03) !important;
 }
 
+/* Lint: wavy underlines — override CM default colors with our red/amber */
+.cm-lintRange.cm-lintRange-error {
+  background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'><path d='m0 2.5 l2 -1.5 l1 0 l2 1.5 l1 0' stroke='%23ff4444' fill='none' stroke-width='.7'/></svg>") !important;
+  background-repeat: repeat-x !important;
+  background-position: bottom !important;
+  padding-bottom: 1px !important;
+}
+.cm-lintRange.cm-lintRange-warning {
+  background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'><path d='m0 2.5 l2 -1.5 l1 0 l2 1.5 l1 0' stroke='%23ffaa00' fill='none' stroke-width='.7'/></svg>") !important;
+  background-repeat: repeat-x !important;
+  background-position: bottom !important;
+  padding-bottom: 1px !important;
+}
+
+/* Lint: tooltip styling */
+.cm-tooltip.cm-tooltip-hover,
+.cm-tooltip-lint {
+  background-color: #0a0a0a !important;
+  border: 1px solid #1a4a1a !important;
+  color: #ccc !important;
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 11px !important;
+  border-radius: 3px !important;
+}
+.cm-diagnostic {
+  padding: 3px 8px !important;
+}
+.cm-diagnostic-error {
+  border-left: 3px solid #ff4444 !important;
+}
+.cm-diagnostic-warning {
+  border-left: 3px solid #ffaa00 !important;
+}
+
+/* Hide inline lint panel */
+.cm-panel-lint {
+  display: none !important;
+}
+
 /* Pulsing dot animation for progress */
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; transform: scale(1); }

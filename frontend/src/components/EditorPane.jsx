@@ -5,7 +5,7 @@ import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { bracketMatching, indentOnInput, StreamLanguage } from '@codemirror/language'
 import { closeBrackets, closeBracketsKeymap, autocompletion } from '@codemirror/autocomplete'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
-import { linter, lintGutter } from '@codemirror/lint'
+import { linter } from '@codemirror/lint'
 import { verilog } from '@codemirror/legacy-modes/mode/verilog'
 import { oneDark } from './oneDarkTheme.js'
 import { verilogLint } from './verilogLinter.js'
@@ -56,9 +56,8 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
         oneDark,
         updateListener,
 
-        // Verilog linter — 500ms debounce, hover-only tooltips
-        linter(verilogLint, { delay: 500, tooltipFilter: () => [] }),
-        lintGutter(),
+        // Verilog linter — 500ms debounce
+        linter(verilogLint, { delay: 500 }),
 
         // Verilog autocomplete — trigger after 2 chars or Ctrl+Space
         autocompletion({
@@ -76,56 +75,32 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
         EditorView.theme({
           '&': { height: '100%' },
 
-          // Lint: wavy underlines only (no background image)
-          '.cm-lintRange-error': {
-            backgroundImage: 'none !important',
-            textDecoration: 'underline wavy #ff4444',
-            textDecorationSkipInk: 'none',
-            textUnderlineOffset: '3px',
-          },
-          '.cm-lintRange-warning': {
-            backgroundImage: 'none !important',
-            textDecoration: 'underline wavy #ffaa00',
-            textDecorationSkipInk: 'none',
-            textUnderlineOffset: '3px',
-          },
+          // Lint underlines: colors handled by index.css with SVG overrides
 
-          // Lint gutter: small colored dots
-          '.cm-lint-marker': { width: '8px', height: '8px' },
-          '.cm-lint-marker-error': { content: '"!"', color: '#ff4444' },
-          '.cm-lint-marker-warning': { content: '"!"', color: '#ffaa00' },
-
-          // Hide the inline diagnostic panel (the yellow box)
-          '.cm-panel-lint': { display: 'none !important' },
-          '.cm-panel.cm-panel-lint': { display: 'none !important' },
-
-          // Hover tooltip styling (appears on hover over underlined tokens)
-          '.cm-tooltip-lint': {
+          // Lint hover tooltip
+          '.cm-tooltip-hover, .cm-tooltip-lint, .cm-tooltip': {
             backgroundColor: '#0a0a0a !important',
             border: '1px solid #1a4a1a !important',
-            color: '#ccc',
+            color: '#ccc !important',
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: '11px',
-            padding: '4px 8px',
             borderRadius: '3px',
-            maxWidth: '400px',
-          },
-          '.cm-tooltip': {
-            backgroundColor: '#0a0a0a !important',
-            border: '1px solid #1a4a1a !important',
           },
           '.cm-diagnostic': {
-            padding: '2px 6px',
+            padding: '3px 8px',
             borderLeft: 'none',
           },
           '.cm-diagnostic-error': {
             borderLeft: '3px solid #ff4444 !important',
-            paddingLeft: '6px',
+            paddingLeft: '8px',
           },
           '.cm-diagnostic-warning': {
             borderLeft: '3px solid #ffaa00 !important',
-            paddingLeft: '6px',
+            paddingLeft: '8px',
           },
+
+          // Hide the persistent inline lint panel if it appears
+          '.cm-panel-lint': { display: 'none !important' },
           // Autocomplete popup
           '.cm-tooltip-autocomplete': {
             backgroundColor: '#0a0a0a !important',
