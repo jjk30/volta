@@ -81,7 +81,7 @@ function ThinkingDots() {
   )
 }
 
-export default function ChatBot({ design, testbench, autoMessage, simResult }) {
+export default function ChatBot({ design, testbench, autoMessage, simResult, lastSelectedSymbol }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -126,6 +126,11 @@ export default function ChatBot({ design, testbench, autoMessage, simResult }) {
             })),
             stdout: simResult.stdout || '',
             stderr: simResult.stderr || '',
+          } : null,
+          selectedSymbol: lastSelectedSymbol ? {
+            name: lastSelectedSymbol.name,
+            promptText: lastSelectedSymbol.promptText,
+            truthTable: lastSelectedSymbol.truthTable || null,
           } : null,
         }),
       })

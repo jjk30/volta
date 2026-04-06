@@ -27,6 +27,7 @@ export const SYMBOLS = {
     {
       name: 'AND',
       id: 'and',
+      promptText: 'Design a 2-input AND gate',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <path d="M20,25 H55 A30,25 0 0 1 55,75 H20 Z" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="40" x2="20" y2="40" stroke="${c}" stroke-width="1.5"/>
@@ -40,6 +41,7 @@ export const SYMBOLS = {
     {
       name: 'OR',
       id: 'or',
+      promptText: 'Design a 2-input OR gate',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <path d="M20,25 Q40,50 20,75 Q55,75 85,50 Q55,25 20,25 Z" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="40" x2="28" y2="40" stroke="${c}" stroke-width="1.5"/>
@@ -53,6 +55,7 @@ export const SYMBOLS = {
     {
       name: 'NOT',
       id: 'not',
+      promptText: 'Design a NOT gate (inverter)',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <polygon points="20,25 80,50 20,75" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${bubble(86, 50, c)}
@@ -66,6 +69,7 @@ export const SYMBOLS = {
     {
       name: 'NAND',
       id: 'nand',
+      promptText: 'Design a 2-input NAND gate',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <path d="M20,25 H50 A30,25 0 0 1 50,75 H20 Z" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${bubble(84, 50, c)}
@@ -80,6 +84,7 @@ export const SYMBOLS = {
     {
       name: 'NOR',
       id: 'nor',
+      promptText: 'Design a 2-input NOR gate',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <path d="M20,25 Q40,50 20,75 Q55,75 80,50 Q55,25 20,25 Z" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${bubble(84, 50, c)}
@@ -94,6 +99,7 @@ export const SYMBOLS = {
     {
       name: 'XOR',
       id: 'xor',
+      promptText: 'Design a 2-input XOR gate',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <path d="M25,25 Q45,50 25,75 Q60,75 85,50 Q60,25 25,25 Z" stroke="${c}" stroke-width="1.8" fill="none"/>
         <path d="M18,25 Q38,50 18,75" stroke="${c}" stroke-width="1.5" fill="none"/>
@@ -108,6 +114,7 @@ export const SYMBOLS = {
     {
       name: 'XNOR',
       id: 'xnor',
+      promptText: 'Design a 2-input XNOR gate',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <path d="M25,25 Q45,50 25,75 Q60,75 80,50 Q60,25 25,25 Z" stroke="${c}" stroke-width="1.8" fill="none"/>
         <path d="M18,25 Q38,50 18,75" stroke="${c}" stroke-width="1.5" fill="none"/>
@@ -123,6 +130,7 @@ export const SYMBOLS = {
     {
       name: 'Buffer',
       id: 'buffer',
+      promptText: 'Design a buffer',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <polygon points="25,25 85,50 25,75" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="50" x2="25" y2="50" stroke="${c}" stroke-width="1.5"/>
@@ -135,6 +143,7 @@ export const SYMBOLS = {
     {
       name: 'Tri-state',
       id: 'tristate',
+      promptText: 'Design a tri-state buffer with enable',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <polygon points="25,30 80,50 25,70" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="50" x2="25" y2="50" stroke="${c}" stroke-width="1.5"/>
@@ -151,6 +160,7 @@ export const SYMBOLS = {
     {
       name: '2:1 MUX',
       id: 'mux2',
+      promptText: 'Design a 2-to-1 multiplexer',
       svg: (c) => `<svg viewBox="0 0 120 105" xmlns="http://www.w3.org/2000/svg">
         <polygon points="25,15 85,30 85,70 25,85" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="35" x2="25" y2="35" stroke="${c}" stroke-width="1.5"/>
@@ -165,6 +175,7 @@ export const SYMBOLS = {
     {
       name: '4:1 MUX',
       id: 'mux4',
+      promptText: 'Design a 4-to-1 multiplexer',
       svg: (c) => `<svg viewBox="0 0 120 105" xmlns="http://www.w3.org/2000/svg">
         <polygon points="20,10 80,25 80,75 20,90" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="25" x2="20" y2="25" stroke="${c}" stroke-width="1.5"/>
@@ -182,6 +193,7 @@ export const SYMBOLS = {
     {
       name: '8:1 MUX',
       id: 'mux8',
+      promptText: 'Design an 8-to-1 multiplexer',
       svg: (c) => `<svg viewBox="0 0 120 108" xmlns="http://www.w3.org/2000/svg">
         <polygon points="20,5 80,20 80,80 20,95" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${[0,1,2,3,4,5,6,7].map(i => `<line x1="5" y1="${15+i*10}" x2="20" y2="${15+i*10}" stroke="${c}" stroke-width="1"/>`).join('')}
@@ -194,6 +206,7 @@ export const SYMBOLS = {
     {
       name: '1:2 DEMUX',
       id: 'demux2',
+      promptText: 'Design a 1-to-2 demultiplexer',
       svg: (c) => `<svg viewBox="0 0 120 105" xmlns="http://www.w3.org/2000/svg">
         <polygon points="85,15 25,30 25,70 85,85" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="50" x2="25" y2="50" stroke="${c}" stroke-width="1.5"/>
@@ -207,6 +220,7 @@ export const SYMBOLS = {
     {
       name: '1:4 DEMUX',
       id: 'demux4',
+      promptText: 'Design a 1-to-4 demultiplexer',
       svg: (c) => `<svg viewBox="0 0 120 108" xmlns="http://www.w3.org/2000/svg">
         <polygon points="80,10 30,25 30,75 80,90" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="50" x2="30" y2="50" stroke="${c}" stroke-width="1.5"/>
@@ -225,6 +239,7 @@ export const SYMBOLS = {
     {
       name: 'ALU',
       id: 'alu',
+      promptText: 'Design a 4-bit ALU with add, subtract, AND, and OR operations',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <path d="M20,15 H60 L90,50 L60,85 H20 L35,50 Z" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="30" x2="20" y2="30" stroke="${c}" stroke-width="1.5"/>
@@ -238,6 +253,7 @@ export const SYMBOLS = {
     {
       name: 'Full Adder',
       id: 'fulladd',
+      promptText: 'Design a full adder',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="20" width="60" height="60" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 55, 'FA', c, 'middle', '14')}
@@ -254,6 +270,7 @@ export const SYMBOLS = {
     {
       name: 'Half Adder',
       id: 'halfadd',
+      promptText: 'Design a half adder',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="20" width="60" height="60" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 55, 'HA', c, 'middle', '14')}
@@ -269,6 +286,7 @@ export const SYMBOLS = {
     {
       name: 'Comparator',
       id: 'cmp',
+      promptText: 'Design a 4-bit comparator with greater-than, equal, and less-than outputs',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="15" width="55" height="70" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(52, 52, 'CMP', c, 'middle', '11')}
@@ -285,6 +303,7 @@ export const SYMBOLS = {
     {
       name: 'Shifter',
       id: 'shifter',
+      promptText: 'Design an 8-bit barrel shifter with left and right shift',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="20" width="60" height="60" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 48, '>>', c, 'middle', '12')}${lbl(55, 62, '<<', c, 'middle', '12')}
@@ -301,6 +320,7 @@ export const SYMBOLS = {
     {
       name: 'D Flip-Flop',
       id: 'dff',
+      promptText: 'Design a D flip-flop with asynchronous reset',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="15" width="60" height="70" rx="2" stroke="${c}" stroke-width="1.8" fill="none"/>
         <polygon points="25,72 35,80 25,88" stroke="${c}" stroke-width="1" fill="none"/>
@@ -315,6 +335,7 @@ export const SYMBOLS = {
     {
       name: 'JK Flip-Flop',
       id: 'jkff',
+      promptText: 'Design a JK flip-flop',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="15" width="60" height="70" rx="2" stroke="${c}" stroke-width="1.8" fill="none"/>
         <polygon points="25,72 35,80 25,88" stroke="${c}" stroke-width="1" fill="none"/>
@@ -331,6 +352,7 @@ export const SYMBOLS = {
     {
       name: 'T Flip-Flop',
       id: 'tff',
+      promptText: 'Design a T flip-flop with enable',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="15" width="60" height="70" rx="2" stroke="${c}" stroke-width="1.8" fill="none"/>
         <polygon points="25,72 35,80 25,88" stroke="${c}" stroke-width="1" fill="none"/>
@@ -345,6 +367,7 @@ export const SYMBOLS = {
     {
       name: 'SR Latch',
       id: 'srlatch',
+      promptText: 'Design an SR latch',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="20" width="60" height="60" rx="2" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="35" x2="25" y2="35" stroke="${c}" stroke-width="1.5"/>
@@ -362,6 +385,7 @@ export const SYMBOLS = {
     {
       name: 'Register',
       id: 'reg',
+      promptText: 'Design an 8-bit register with enable',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="20" y="20" width="70" height="60" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         <polygon points="20,68 30,75 20,82" stroke="${c}" stroke-width="1" fill="none"/>
@@ -376,6 +400,7 @@ export const SYMBOLS = {
     {
       name: 'RAM',
       id: 'ram',
+      promptText: 'Design a 256x8 RAM with one read port and one write port',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="20" y="10" width="70" height="80" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 42, 'RAM', c, 'middle', '12')}${lbl(55, 56, '256x8', c, 'middle', '8')}
@@ -391,6 +416,7 @@ export const SYMBOLS = {
     {
       name: 'ROM',
       id: 'rom',
+      promptText: 'Design a 16x8 ROM',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="20" width="60" height="60" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 55, 'ROM', c, 'middle', '12')}
@@ -403,6 +429,7 @@ export const SYMBOLS = {
     {
       name: 'Reg File',
       id: 'regfile',
+      promptText: 'Design an 8x8 register file with one read port and one write port',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="20" y="8" width="70" height="84" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 40, 'REG', c, 'middle', '10')}${lbl(55, 52, 'FILE', c, 'middle', '10')}${lbl(55, 64, '32x32', c, 'middle', '7')}
@@ -425,6 +452,7 @@ export const SYMBOLS = {
     {
       name: 'Prog Counter',
       id: 'pc',
+      promptText: 'Design a program counter with reset',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="20" width="60" height="60" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         <polygon points="25,68 35,75 25,82" stroke="${c}" stroke-width="1" fill="none"/>
@@ -438,6 +466,7 @@ export const SYMBOLS = {
     {
       name: 'Control Unit',
       id: 'ctrl',
+      promptText: 'Design a simple control unit for a RISC CPU',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="15" y="15" width="80" height="70" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 52, 'CTRL', c, 'middle', '12')}
@@ -452,6 +481,7 @@ export const SYMBOLS = {
     {
       name: 'Instr Mem',
       id: 'imem',
+      promptText: 'Design an instruction memory module',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="20" y="20" width="70" height="60" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 48, 'IMEM', c, 'middle', '11')}
@@ -464,6 +494,7 @@ export const SYMBOLS = {
     {
       name: 'Data Mem',
       id: 'dmem',
+      promptText: 'Design a data memory module with read and write ports',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="20" y="15" width="70" height="70" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 48, 'DMEM', c, 'middle', '11')}
@@ -478,6 +509,7 @@ export const SYMBOLS = {
     {
       name: 'Sign Extend',
       id: 'sext',
+      promptText: 'Design a 16-to-32 bit sign extension unit',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="20" y="25" width="70" height="50" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${lbl(55, 55, 'SEXT', c, 'middle', '11')}
@@ -490,6 +522,7 @@ export const SYMBOLS = {
     {
       name: 'Clock Gen',
       id: 'clkgen',
+      promptText: 'Design a clock divider that divides the input clock by 2',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <circle cx="55" cy="50" r="30" stroke="${c}" stroke-width="1.8" fill="none"/>
         <path d="M40,50 L40,35 L55,35 L55,65 L70,65 L70,50" stroke="${c}" stroke-width="1.5" fill="none"/>
@@ -504,6 +537,7 @@ export const SYMBOLS = {
     {
       name: '2:4 Decoder',
       id: 'dec24',
+      promptText: 'Design a 2-to-4 decoder with enable',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <polygon points="85,10 25,25 25,75 85,90" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="50" x2="25" y2="50" stroke="${c}" stroke-width="1.5"/>
@@ -520,6 +554,7 @@ export const SYMBOLS = {
     {
       name: 'Priority Enc',
       id: 'prienc',
+      promptText: 'Design an 8-to-3 priority encoder',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <polygon points="25,10 85,25 85,75 25,90" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="25" x2="25" y2="25" stroke="${c}" stroke-width="1"/>
