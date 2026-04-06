@@ -437,11 +437,52 @@ def _fix_undeclared_inputs(verilog: str) -> str:
     if not undeclared:
         return verilog
 
-    # Step 4: Add as input wire ports to the module declaration
-    # Determine width for each undeclared signal
+    # Step 4: Infer widths for undeclared signals
+    # Build a map of declared signal widths from the port list
+    declared_widths = {}
+    for port_decl in port_list_match.group(1).split(","):
+        wm = re.match(
+            r'\s*(?:input|output|inout)\s+(?:reg\s+)?(?:wire\s+)?\[(\d+):(\d+)\]\s+(\w+)',
+            port_decl.strip(),
+        )
+        if wm:
+            declared_widths[wm.group(3)] = int(wm.group(1)) - int(wm.group(2)) + 1
+    # Also check internal reg/wire declarations
+    for wm in re.finditer(r'(?:wire|reg)\s+\[(\d+):(\d+)\]\s+(\w+)', body):
+        declared_widths[wm.group(3)] = int(wm.group(1)) - int(wm.group(2)) + 1
+
+    # For each undeclared signal, find companion signals in the same expressions
+    # and infer width from them
+    inferred_widths = {}
+    for name in undeclared:
+        # Search for expressions containing this identifier alongside declared ones
+        # Match patterns like: (b > a), (a + b), a == b, etc.
+        for m in re.finditer(
+            r'(\w+)\s*(?:[><=!&|^+\-*/%]+)\s*' + re.escape(name) + r'\b',
+            cleaned_body,
+        ):
+            companion = m.group(1)
+            if companion in declared_widths:
+                inferred_widths[name] = declared_widths[companion]
+                break
+        if name not in inferred_widths:
+            # Try reverse order: name op companion
+            for m in re.finditer(
+                re.escape(name) + r'\s*(?:[><=!&|^+\-*/%]+)\s*(\w+)',
+                cleaned_body,
+            ):
+                companion = m.group(1)
+                if companion in declared_widths:
+                    inferred_widths[name] = declared_widths[companion]
+                    break
+
+    # Build port declarations with inferred or default widths
     new_ports = []
     for name in sorted(undeclared):
-        if DATA_BUS_PATTERNS.search(name):
+        width = inferred_widths.get(name)
+        if width and width > 1:
+            new_ports.append(f"input wire [{width-1}:0] {name}")
+        elif DATA_BUS_PATTERNS.search(name):
             new_ports.append(f"input wire [7:0] {name}")
         else:
             new_ports.append(f"input wire {name}")
