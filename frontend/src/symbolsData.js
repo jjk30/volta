@@ -151,13 +151,13 @@ export const SYMBOLS = {
     {
       name: '2:1 MUX',
       id: 'mux2',
-      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+      svg: (c) => `<svg viewBox="0 0 120 105" xmlns="http://www.w3.org/2000/svg">
         <polygon points="25,15 85,30 85,70 25,85" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="35" x2="25" y2="35" stroke="${c}" stroke-width="1.5"/>
         <line x1="5" y1="65" x2="25" y2="65" stroke="${c}" stroke-width="1.5"/>
         <line x1="85" y1="50" x2="105" y2="50" stroke="${c}" stroke-width="1.5"/>
         <line x1="55" y1="85" x2="55" y2="72" stroke="${c}" stroke-width="1.5"/>
-        ${lbl(2, 33, 'in0', c)}${lbl(2, 63, 'in1', c)}${lbl(107, 52, 'out', c)}${lbl(58, 95, 'sel', c)}
+        ${lbl(2, 33, 'in0', c)}${lbl(2, 63, 'in1', c)}${lbl(107, 52, 'out', c)}${lbl(58, 97, 'sel', c)}
       </svg>`,
       verilog: `assign out = sel ? in1 : in0;`,
       truthTable: { headers: ['S','Y'], rows: [['0','I0'],['1','I1']] },
@@ -165,7 +165,7 @@ export const SYMBOLS = {
     {
       name: '4:1 MUX',
       id: 'mux4',
-      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+      svg: (c) => `<svg viewBox="0 0 120 105" xmlns="http://www.w3.org/2000/svg">
         <polygon points="20,10 80,25 80,75 20,90" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="25" x2="20" y2="25" stroke="${c}" stroke-width="1.5"/>
         <line x1="5" y1="40" x2="20" y2="40" stroke="${c}" stroke-width="1.5"/>
@@ -174,7 +174,7 @@ export const SYMBOLS = {
         <line x1="80" y1="50" x2="105" y2="50" stroke="${c}" stroke-width="1.5"/>
         <line x1="50" y1="90" x2="50" y2="78" stroke="${c}" stroke-width="1.5"/>
         ${lbl(2, 23, '0', c)}${lbl(2, 38, '1', c)}${lbl(2, 53, '2', c)}${lbl(2, 68, '3', c)}
-        ${lbl(107, 52, 'out', c)}${lbl(53, 98, 'sel', c)}
+        ${lbl(107, 52, 'out', c)}${lbl(53, 100, 'sel', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case (sel)\n    2'b00: out = in0;\n    2'b01: out = in1;\n    2'b10: out = in2;\n    2'b11: out = in3;\n    default: out = 0;\n  endcase\nend`,
       truthTable: { headers: ['S1','S0','Y'], rows: [['0','0','I0'],['0','1','I1'],['1','0','I2'],['1','1','I3']] },
@@ -182,32 +182,32 @@ export const SYMBOLS = {
     {
       name: '8:1 MUX',
       id: 'mux8',
-      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+      svg: (c) => `<svg viewBox="0 0 120 108" xmlns="http://www.w3.org/2000/svg">
         <polygon points="20,5 80,20 80,80 20,95" stroke="${c}" stroke-width="1.8" fill="none"/>
         ${[0,1,2,3,4,5,6,7].map(i => `<line x1="5" y1="${15+i*10}" x2="20" y2="${15+i*10}" stroke="${c}" stroke-width="1"/>`).join('')}
         <line x1="80" y1="50" x2="105" y2="50" stroke="${c}" stroke-width="1.5"/>
         <line x1="50" y1="95" x2="50" y2="84" stroke="${c}" stroke-width="1.5"/>
-        ${lbl(50, 50, '8:1', c, 'middle', '10')}${lbl(107, 52, 'out', c)}${lbl(53, 99, 'sel', c)}
+        ${lbl(50, 50, '8:1', c, 'middle', '10')}${lbl(107, 52, 'out', c)}${lbl(53, 104, 'sel', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case (sel)\n    3'd0: out = in0;\n    3'd1: out = in1;\n    3'd2: out = in2;\n    3'd3: out = in3;\n    3'd4: out = in4;\n    3'd5: out = in5;\n    3'd6: out = in6;\n    3'd7: out = in7;\n    default: out = 0;\n  endcase\nend`,
     },
     {
       name: '1:2 DEMUX',
       id: 'demux2',
-      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+      svg: (c) => `<svg viewBox="0 0 120 105" xmlns="http://www.w3.org/2000/svg">
         <polygon points="85,15 25,30 25,70 85,85" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="50" x2="25" y2="50" stroke="${c}" stroke-width="1.5"/>
         <line x1="85" y1="35" x2="105" y2="35" stroke="${c}" stroke-width="1.5"/>
         <line x1="85" y1="65" x2="105" y2="65" stroke="${c}" stroke-width="1.5"/>
         <line x1="55" y1="85" x2="55" y2="72" stroke="${c}" stroke-width="1.5"/>
-        ${lbl(2, 48, 'in', c)}${lbl(107, 33, 'y0', c)}${lbl(107, 63, 'y1', c)}${lbl(58, 95, 'sel', c)}
+        ${lbl(2, 48, 'in', c)}${lbl(107, 33, 'y0', c)}${lbl(107, 63, 'y1', c)}${lbl(58, 97, 'sel', c)}
       </svg>`,
       verilog: `assign y0 = sel ? 1'b0 : in;\nassign y1 = sel ? in : 1'b0;`,
     },
     {
       name: '1:4 DEMUX',
       id: 'demux4',
-      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+      svg: (c) => `<svg viewBox="0 0 120 108" xmlns="http://www.w3.org/2000/svg">
         <polygon points="80,10 30,25 30,75 80,90" stroke="${c}" stroke-width="1.8" fill="none"/>
         <line x1="5" y1="50" x2="30" y2="50" stroke="${c}" stroke-width="1.5"/>
         <line x1="80" y1="25" x2="105" y2="25" stroke="${c}" stroke-width="1.5"/>
@@ -215,7 +215,7 @@ export const SYMBOLS = {
         <line x1="80" y1="58" x2="105" y2="58" stroke="${c}" stroke-width="1.5"/>
         <line x1="80" y1="75" x2="105" y2="75" stroke="${c}" stroke-width="1.5"/>
         <line x1="55" y1="90" x2="55" y2="80" stroke="${c}" stroke-width="1.5"/>
-        ${lbl(2, 48, 'in', c)}${lbl(55, 50, '1:4', c, 'middle', '9')}${lbl(58, 98, 'sel', c)}
+        ${lbl(2, 48, 'in', c)}${lbl(55, 50, '1:4', c, 'middle', '9')}${lbl(58, 100, 'sel', c)}
       </svg>`,
       verilog: `always @(*) begin\n  {y3, y2, y1, y0} = 4'b0000;\n  case (sel)\n    2'b00: y0 = in;\n    2'b01: y1 = in;\n    2'b10: y2 = in;\n    2'b11: y3 = in;\n  endcase\nend`,
     },
@@ -287,7 +287,7 @@ export const SYMBOLS = {
       id: 'shifter',
       svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
         <rect x="25" y="20" width="60" height="60" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
-        ${lbl(55, 48, '>>', c, 'middle', '16')}${lbl(55, 62, '<<', c, 'middle', '16')}
+        ${lbl(55, 48, '>>', c, 'middle', '12')}${lbl(55, 62, '<<', c, 'middle', '12')}
         <line x1="5" y1="50" x2="25" y2="50" stroke="${c}" stroke-width="1.5"/>
         <line x1="85" y1="50" x2="110" y2="50" stroke="${c}" stroke-width="1.5"/>
         <line x1="55" y1="20" x2="55" y2="8" stroke="${c}" stroke-width="1.5"/>
