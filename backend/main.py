@@ -623,7 +623,7 @@ async def chat(req: ChatRequest):
     try:
         import requests as http_requests
         resp = http_requests.post("http://localhost:11434/api/generate", json={
-            "model": "rtlcoder",
+            "model": "qwen2.5-coder:7b",
             "prompt": conversation,
             "stream": False,
             "options": {"temperature": 0.3, "num_predict": max_tokens},
@@ -636,7 +636,7 @@ async def chat(req: ChatRequest):
             detail=f"Chat failed: {e}. Is Ollama running?",
         )
 
-    # Strip model special tokens (RTLCoder, CodeLlama, etc.)
+    # Strip model special tokens (Qwen, CodeLlama, etc.)
     for token in [
         "<|EOT|>", "<|endoftext|>",
         "<|begin_of_sentence|>", "<|end_of_sentence|>",

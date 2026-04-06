@@ -1,1 +1,5 @@
-FROM hf.co/mradermacher/RTLCoder-Deepseek-v1.1-GGUF:Q4_K_M
+# ARCHIVED — Volta now uses qwen2.5-coder:7b pulled directly from Ollama registry.
+# No custom Modelfile needed. Just run: ollama pull qwen2.5-coder:7b
+#
+# Previous model (deprecated):
+# FROM hf.co/mradermacher/RTLCoder-Deepseek-v1.1-GGUF:Q4_K_M

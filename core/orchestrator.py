@@ -927,7 +927,7 @@ def verify_compile(design: str, testbench: str) -> tuple[bool, str]:
 # Direct generation fallback (no spec)
 # ---------------------------------------------------------------------------
 
-def _direct_generate(prompt: str, model: str = "rtlcoder") -> str:
+def _direct_generate(prompt: str, model: str = "qwen2.5-coder:7b") -> str:
     """Generate Verilog directly from a prompt, without a spec.
 
     Used as fallback when spec interpretation fails.
@@ -955,7 +955,7 @@ def _direct_generate(prompt: str, model: str = "rtlcoder") -> str:
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-def generate(prompt: str, model: str = "rtlcoder") -> dict:
+def generate(prompt: str, model: str = "qwen2.5-coder:7b") -> dict:
     """Full generate pipeline: prompt → spec → Verilog → correction → testbench.
 
     Falls back to direct generation if spec interpretation fails.

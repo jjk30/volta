@@ -2,7 +2,7 @@
 
 AI-powered Verilog IDE. Describe a hardware design in natural language, get synthesizable Verilog, simulate it, and visualize waveforms — all in the browser.
 
-Volta uses a local LLM (RTLCoder via Ollama) to interpret design prompts into structured specs, generate Verilog RTL, auto-fix synthesis errors with Yosys, build testbenches, and compile with Icarus Verilog. The frontend is a terminal-themed split-pane editor with a block diagram viewer, waveform display, symbols library, and an integrated chat assistant.
+Volta uses a local LLM (Qwen2.5-Coder-7B via Ollama, Apache 2.0 licensed) to interpret design prompts into structured specs, generate Verilog RTL, auto-fix synthesis errors with Yosys, build testbenches, and compile with Icarus Verilog. The frontend is a terminal-themed split-pane editor with a block diagram viewer, waveform display, symbols library, and an integrated chat assistant.
 
 ---
 
@@ -72,20 +72,20 @@ cd volta
 
 ### 2. Set up the LLM model
 
-Start Ollama and create the RTLCoder model:
+Start Ollama and pull the Qwen2.5-Coder model:
 
 ```bash
 # Start Ollama (runs in background)
 ollama serve &
 
-# Create the RTLCoder model from the Modelfile
-ollama create rtlcoder -f Modelfile
+# Pull the Qwen2.5-Coder model (Apache 2.0 licensed)
+ollama pull qwen2.5-coder:7b
 
 # Verify it's loaded
 ollama list
 ```
 
-This downloads the RTLCoder-Deepseek-v1.1 model (~4GB, Q4_K_M quantization) optimized for Verilog generation.
+This downloads Qwen2.5-Coder-7B (~4.7GB) — a code-specialized LLM with strong Verilog generation capabilities, licensed under Apache 2.0.
 
 ### 3. Install backend dependencies
 
@@ -181,7 +181,7 @@ The UI runs at `http://localhost:5173`. Open it in your browser.
 - Cancel/abort for in-flight requests
 
 ### Chat Assistant
-- Hardware design expert powered by RTLCoder
+- Hardware design expert powered by Qwen2.5-Coder
 - Context-aware: sees current design, testbench, and simulation results
 - Off-topic filtering (3-layer: keyword, prompt, post-response)
 - Short-mode with list-aware truncation
@@ -261,21 +261,21 @@ To change the LLM model, edit the `model` parameter in `core/spec_interpreter.py
 | Issue | Fix |
 |-------|-----|
 | `Ollama not reachable` | Run `ollama serve` in a separate terminal |
-| `rtlcoder model not found` | Run `ollama create rtlcoder -f Modelfile` |
+| `qwen2.5-coder model not found` | Run `ollama pull qwen2.5-coder:7b` |
 | `Yosys not found` | `brew install yosys` (macOS) or `apt install yosys` (Ubuntu) |
 | `iverilog not found` | `brew install icarus-verilog` or `apt install iverilog` |
 | `Port 5173 in use` | Kill the old process: `lsof -ti :5173 \| xargs kill` |
 | `Port 8000 in use` | Kill the old process: `lsof -ti :8000 \| xargs kill` |
 | `ModuleNotFoundError: pydantic` | `pip install pydantic requests` |
 | Frontend shows old code after changes | Hard refresh: `Cmd+Shift+R` or clear Vite cache |
-| Generation takes too long | RTLCoder needs ~4GB RAM. Check `ollama ps` for memory usage. |
+| Generation takes too long | Qwen2.5-Coder needs ~5GB RAM. Check `ollama ps` for memory usage. |
 | Yosys passes but iverilog fails | The post-processor handles most cases. File a bug with the Verilog output. |
 
 ---
 
 ## Tech Stack
 
-- **LLM**: RTLCoder-Deepseek-v1.1 (4-bit quantized, via Ollama)
+- **LLM**: Qwen2.5-Coder-7B (Apache 2.0, via Ollama)
 - **Backend**: Python, FastAPI, Pydantic
 - **Frontend**: React 19, Vite 8, CodeMirror 6, rough.js, react-markdown
 - **EDA Tools**: Yosys (synthesis), Icarus Verilog (simulation), Verilator (optional)
