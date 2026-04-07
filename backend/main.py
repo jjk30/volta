@@ -421,6 +421,7 @@ COMBINATIONAL_IDS = {
     'mux2', 'mux4', 'mux8', 'demux2', 'demux4',
     'dec24', 'prienc',
     'fulladd', 'halfadd', 'cmp', 'shifter', 'sext',
+    'alu', 'rom',  # combinational but may need driving (checked separately)
 }
 # SEQUENTIAL: clock REQUIRED
 SEQUENTIAL_IDS = {
@@ -431,59 +432,68 @@ SEQUENTIAL_IDS = {
 
 SELF_CONTAINED_IDS = {'clkgen'}
 NEEDS_CLOCK_IDS = {'dff', 'jkff', 'tff', 'reg', 'ram', 'regfile', 'pc', 'dmem'}
-NEEDS_OPERANDS_IDS = {'alu', 'cmp', 'fulladd', 'halfadd'}
+NEEDS_OPERANDS_IDS = {'alu'}  # Only ALU truly needs operand sources + opcode driver
 NEEDS_ADDRESS_IDS = {'ram', 'rom', 'regfile', 'dmem', 'imem'}
 PROVIDES_CLOCK_IDS = {'clkgen'}
 PROVIDES_DATA_IDS = {'reg', 'regfile', 'pc', 'ram', 'rom', 'dmem', 'imem'}
 
 STRICT_REVIEWER_PROMPT = """
-You are NOT a customer service agent. Do not be polite about flaws. Students benefit from honest critique, not false praise.
+You are NOT a customer service agent. Students benefit from honest critique, not false praise.
 
-VERDICT TIERS (use exactly one as your final verdict):
-- **WORKING**: Complete circuit with all signals driven by selected components.
-- **WORKING AS STANDALONE MODULE**: ONLY for single COMBINATIONAL components (gates, MUX, decoder, adder, comparator, shifter). These have no internal state and a testbench legitimately demonstrates their function.
-- **INCOMPLETE**: Missing components needed to function. This is the DEFAULT when in doubt.
-- **BROKEN**: Logical/syntactic errors or nonsensical topology.
-- **RISKY**: Timing hazards, race conditions, or EE concerns.
+VERDICT TIERS (use exactly one — end your response with "Final verdict: X"):
+- **WORKING**: Complete circuit, all signals driven by selected components.
+- **WORKING AS STANDALONE MODULE**: Combinational component(s) with no internal state. Testbench legitimately demonstrates the function.
+- **INCOMPLETE**: Missing components needed to function. DEFAULT when in doubt.
+- **BROKEN**: Nonsensical topology or logical errors.
+- **RISKY**: Timing hazards, race conditions.
 
-CRITICAL RULE — TESTBENCH IS NOT A COMPONENT:
-The testbench provides signals only for SIMULATION. It is not part of the user's circuit.
-When checking if a circuit is complete, look ONLY at the user's SELECTED components, not the testbench.
-- If user selected only a D flip-flop, the verdict is INCOMPLETE — even though the testbench drives clk for simulation. The flip-flop has no clock source IN THE SELECTION.
-- If user selected only a JK/T/SR flip-flop, latch, register, counter, RAM, FIFO, or any sequential element with no Clock Gen component selected → INCOMPLETE
-- The presence of `input wire clk` declares a CLOCK INPUT REQUIREMENT, not a clock source
-- The testbench providing #5 clk = ~clk is not a real clock source — it only exists during simulation
+=== TESTBENCH IS NOT A COMPONENT ===
+The testbench provides signals ONLY for simulation. It is NOT part of the user's circuit.
+- `input wire clk` declares a REQUIREMENT, not a source. The testbench's `#5 clk = ~clk` is simulation-only.
+- If a flip-flop/register/RAM/counter is selected with no Clock Gen → INCOMPLETE. Period.
+- NEVER say "the testbench provides clk so it works." That reasoning is WRONG.
 
-STANDALONE RULE — only for COMBINATIONAL components:
-- AND, OR, NOT, NAND, NOR, XOR, XNOR, Buffer, Tri-state → STANDALONE (combinational, no state)
-- MUX (2:1, 4:1, 8:1), DEMUX → STANDALONE (combinational)
-- Decoder, Priority Encoder → STANDALONE (combinational)
-- Half Adder, Full Adder, Comparator, Shifter → STANDALONE (combinational)
-- Sign Extend → STANDALONE (combinational)
-These components have NO internal state. The testbench legitimately demonstrates them.
+=== COMBINATIONAL STANDALONE COMPONENTS ===
+These are WORKING AS STANDALONE MODULE when selected alone OR in groups:
+- Logic gates: AND, OR, NOT, NAND, NOR, XOR, XNOR, Buffer, Tri-State
+- Multiplexers: 2:1 MUX, 4:1 MUX, 8:1 MUX, 1:2 DEMUX, 1:4 DEMUX
+- Decoders/encoders: 2:4 Decoder, Priority Encoder
+- Adders: Half Adder, Full Adder, multi-bit adders from Full Adders (e.g. ripple carry)
+- Comparator, Shifter, Sign Extend
 
-NEEDS-DRIVING COMPONENTS — alone is ALWAYS INCOMPLETE:
+These have NO internal state, NO clock requirement. The testbench legitimately demonstrates them.
+Do NOT demand drivers for these. They expect inputs from outside — that is normal.
+Multiple combinational components together (e.g. AND+OR+NOT, MUX+decoder, 2x full adder) → also STANDALONE.
+
+=== NEEDS-DRIVING — alone is INCOMPLETE ===
 - ALU alone → INCOMPLETE (needs operand sources and opcode driver)
 - Register File alone → INCOMPLETE (needs address sources and clock)
-- ROM alone → INCOMPLETE (needs address driver from user's selection)
+- ROM alone → INCOMPLETE (ROM needs address driver — its contents are meaningless without a programmed address source)
 - RAM alone → INCOMPLETE (needs address, data, write enable, clock)
 - Clock divider alone → INCOMPLETE (needs source clock input)
 - Program counter alone → INCOMPLETE (needs clock)
 - Instruction/Data memory alone → INCOMPLETE (needs address driver)
-- Any flip-flop alone (D, JK, T, SR) → INCOMPLETE (needs clock source)
+- Any flip-flop alone (D, JK, T, SR) → INCOMPLETE (needs clock source in selection)
 - Any register/counter alone → INCOMPLETE (needs clock source)
 
-NONSENSICAL TOPOLOGY DETECTION:
-- Two decoders chained (decoder output → decoder input): a decoder produces one-hot output, not a binary address. Cascading them is meaningless. → BROKEN
-- Two priority encoders chained: same problem in reverse. → BROKEN
-- Two memory elements with no addressing logic between them → INCOMPLETE
-- Two unrelated components with no shared signals (e.g. AND gate + JK flip-flop) → INCOMPLETE (disconnected, and FF still needs clock)
-- Instruction memory + Data memory together with no PC, ALU, register file → INCOMPLETE PARTIAL CPU
+WHY ROM IS NEEDS-DRIVING BUT DECODER IS STANDALONE:
+- Decoder has a clear textbook function demonstrated with arbitrary inputs: address 00 → output 0001.
+- ROM is a lookup table — without programmed data and an address source from the user's selection, the demo is meaningless.
+- Memory (RAM, ROM, Reg File) is NEEDS-DRIVING because the stored contents matter.
 
-CONSISTENCY RULE:
-Give ONE final verdict. Do not contradict yourself. If you said INCOMPLETE, the verdict stays INCOMPLETE.
+=== STRICT BROKEN-CIRCUIT DETECTION ===
+A circuit is BROKEN when its topology is logically incoherent:
+1. Two decoders chained: decoder produces one-hot output (one bit high). Second decoder expects binary address. Feeding one-hot into binary address is meaningless → BROKEN.
+2. Two priority encoders chained: encoder output is too narrow to meaningfully feed another encoder → BROKEN.
+3. Decoder feeding encoder of same width: cancels out, identity function → BROKEN as a design choice.
+When you see "cascaded decoders", "two decoders", "2x decoder", "2x encoder" → BROKEN. Not STANDALONE.
 
-FINAL OVERRIDE: If you find yourself saying 'the testbench provides X so the design works,' STOP. The testbench is not the design. The design is what the user selected from the symbol library. Re-evaluate using only the selected components. If they don't form a complete circuit on their own, the verdict is INCOMPLETE regardless of what the testbench does.
+=== CONSISTENCY ===
+ONE final verdict. No contradictions. End with: "Final verdict: [VERDICT]"
+If INCOMPLETE appeared in your analysis, final verdict MUST be INCOMPLETE.
+
+=== FINAL OVERRIDE ===
+If you catch yourself saying "the testbench provides X so the design works" → STOP. Re-evaluate using ONLY selected components. Testbench ≠ circuit.
 """
 
 
@@ -789,19 +799,37 @@ async def chat(req: ChatRequest):
         is_single_component = len(selected) == 1
 
         # Build dependency warnings
+        # Check for nonsensical topologies
+        is_cascaded_decoders = sum(1 for s in selected if 'decoder' in s.name.lower() or 'dec' in s.name.lower()) >= 2
+        is_cascaded_encoders = sum(1 for s in selected if 'encoder' in s.name.lower() or 'prienc' in s.name.lower()) >= 2
+
         dep_warnings = []
         circuit_type = "COMBINATIONAL" if all_combinational else "SEQUENTIAL" if has_sequential else "MIXED"
 
-        if is_single_component and all_combinational:
-            dep_warnings.append(f"STANDALONE: Single combinational component ({sym_names[0]}). Verdict should be WORKING AS STANDALONE MODULE.")
-        elif needs_clock and not has_clock_source:
-            dep_warnings.append("INCOMPLETE — MISSING CLOCK SOURCE: Sequential components selected but no Clock Gen in selection. The testbench clock does NOT count. Verdict must be INCOMPLETE.")
-        if needs_operands and not has_data_source:
-            dep_warnings.append("INCOMPLETE — MISSING OPERAND SOURCES: ALU/comparator/adder needs register or data sources. Verdict must be INCOMPLETE.")
-        if needs_address and not all_combinational:
-            dep_warnings.append("INCOMPLETE — MISSING ADDRESS/DATA DRIVERS: Memory needs address sources from user's selection. Verdict must be INCOMPLETE.")
-        if is_single_component and not all_combinational and not has_clock_source:
-            dep_warnings.append(f"INCOMPLETE — Single sequential/needs-driving component ({sym_names[0]}) without required drivers. Verdict must be INCOMPLETE.")
+        if is_cascaded_decoders:
+            dep_warnings.append("BROKEN — Cascaded decoders: decoder produces one-hot output, not a valid binary address for another decoder. Nonsensical topology. Verdict must be BROKEN.")
+        elif is_cascaded_encoders:
+            dep_warnings.append("BROKEN — Cascaded priority encoders: encoder output too narrow to meaningfully feed another encoder. Verdict must be BROKEN.")
+        elif all_combinational:
+            # All combinational — but check if any need driving (ALU, ROM, etc.)
+            needs_driving_check = needs_operands or needs_address
+            if needs_driving_check:
+                if needs_operands:
+                    dep_warnings.append("INCOMPLETE — ALU selected alone needs operand sources and opcode driver. Verdict must be INCOMPLETE.")
+                if needs_address:
+                    dep_warnings.append("INCOMPLETE — ROM/memory selected needs address driver from user's selection. Verdict must be INCOMPLETE.")
+            else:
+                dep_warnings.append(f"STANDALONE: All selected components are combinational ({', '.join(sym_names)}). No clock needed. Verdict should be WORKING AS STANDALONE MODULE.")
+        else:
+            # Has sequential components — check dependencies
+            if needs_clock and not has_clock_source:
+                dep_warnings.append("INCOMPLETE — MISSING CLOCK SOURCE: Sequential components selected but no Clock Gen in selection. The testbench clock does NOT count. Verdict must be INCOMPLETE.")
+            if needs_operands and not has_data_source:
+                dep_warnings.append("INCOMPLETE — MISSING OPERAND SOURCES: ALU/comparator/adder needs register or data sources. Verdict must be INCOMPLETE.")
+            if needs_address:
+                dep_warnings.append("INCOMPLETE — MISSING ADDRESS/DATA DRIVERS: Memory needs address sources from user's selection. Verdict must be INCOMPLETE.")
+            if not dep_warnings and has_sequential and not has_clock_source:
+                dep_warnings.append(f"INCOMPLETE — Sequential component(s) without clock source in selection. Verdict must be INCOMPLETE.")
 
         # Validation directive when user asks about correctness
         if VALIDATION_KEYWORDS.search(req.message):
