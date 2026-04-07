@@ -140,19 +140,60 @@ TEST_CASES = [
 # ---------------------------------------------------------------------------
 
 def parse_verdict(response: str) -> str:
-    """Extract verdict from chatbot response text."""
-    text = response.upper()
-    if "BROKEN" in text or "ILLOGICAL" in text:
-        return "BROKEN"
-    if "INCOMPLETE" in text:
-        return "INCOMPLETE"
-    if "RISKY" in text or "WARNING" in text and "HAZARD" in text:
-        return "RISKY"
-    if "STANDALONE" in text:
-        return "STANDALONE"
-    if "WORKING" in text:
-        return "WORKING"
-    return "UNCLEAR"
+    """Extract verdict from chatbot response text.
+
+    Strategy:
+    1. Look for explicit verdict patterns: "Final verdict: X", "Verdict: X", "**X**"
+    2. Fall back to keyword search in first 300 chars
+    3. Priority: STANDALONE > WORKING > INCOMPLETE > BROKEN > RISKY
+       (STANDALONE is more specific than WORKING)
+    """
+    import re
+
+    text = response
+
+    # Step 1: Look for explicit verdict lines
+    verdict_patterns = [
+        r'[Ff]inal [Vv]erdict:\s*\*{0,2}(WORKING AS STANDALONE MODULE|STANDALONE|WORKING|INCOMPLETE|BROKEN|RISKY)\*{0,2}',
+        r'[Vv]erdict:\s*\*{0,2}(WORKING AS STANDALONE MODULE|STANDALONE|WORKING|INCOMPLETE|BROKEN|RISKY)\*{0,2}',
+        r'\*\*(WORKING AS STANDALONE MODULE|STANDALONE|WORKING|INCOMPLETE|BROKEN|RISKY)\*\*',
+    ]
+    for pat in verdict_patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            v = m.group(1).upper()
+            if 'STANDALONE' in v:
+                return 'STANDALONE'
+            if v == 'WORKING':
+                return 'WORKING'
+            if v == 'INCOMPLETE':
+                return 'INCOMPLETE'
+            if v == 'BROKEN':
+                return 'BROKEN'
+            if v == 'RISKY':
+                return 'RISKY'
+
+    # Step 2: Keyword search — check full text but with correct priority
+    upper = text.upper()
+
+    # STANDALONE is more specific — check before WORKING
+    if 'STANDALONE' in upper or 'WORKING AS STANDALONE' in upper:
+        return 'STANDALONE'
+    # INCOMPLETE beats WORKING (if both appear, design is incomplete)
+    if 'INCOMPLETE' in upper:
+        return 'INCOMPLETE'
+    if 'BROKEN' in upper or 'ILLOGICAL' in upper:
+        # But NOT if it appears only in system prompt fragments or quoted rules
+        # Check if BROKEN appears in the model's own words (after any ":" or verdict context)
+        # Simple heuristic: if WORKING/STANDALONE also appears, those take priority
+        if 'WORKING' not in upper and 'STANDALONE' not in upper:
+            return 'BROKEN'
+    if 'RISKY' in upper:
+        return 'RISKY'
+    if 'WORKING' in upper:
+        return 'WORKING'
+
+    return 'UNCLEAR'
 
 
 def build_selected_symbols(symbol_ids: list) -> list:
