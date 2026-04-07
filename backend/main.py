@@ -431,9 +431,100 @@ SYMBOL_BEHAVIOR_RULES = {
 }
 
 VALIDATION_KEYWORDS = re.compile(
-    r'\b(explain|correct|work|valid|truth.?table|check|verify|logic|wrong|bug|error|fix|issue|complete|missing)\b',
+    r'\b(correct|work|valid|check|verify|wrong|bug|error|fix|issue|complete|missing|broken|right)\b',
     re.I,
 )
+
+EXPLAIN_KEYWORDS = re.compile(
+    r'\b(explain|show|teach|what|how|describe|tell)\b',
+    re.I,
+)
+
+
+def compute_verdict(selected_symbols: list, prompt_text: str = "") -> dict:
+    """Deterministically compute the circuit verdict from selected symbols.
+
+    Returns { "verdict": str, "reasons": [str] }
+    The model MUST use this verdict — no second-guessing.
+    """
+
+    if not selected_symbols:
+        return {"verdict": "STANDALONE", "reasons": ["No symbols selected — evaluating generated code only."]}
+
+    # Resolve symbol IDs via fuzzy name matching
+    sym_ids = set()
+    all_known = COMBINATIONAL_IDS | SEQUENTIAL_IDS | NEEDS_OPERANDS_IDS
+    for sym in selected_symbols:
+        sid = sym.name.lower().replace(' ', '').replace('-', '').replace('_', '')
+        for known_id in all_known:
+            if known_id in sid or sid in known_id:
+                sym_ids.add(known_id)
+                break
+
+    sym_names = [s.name for s in selected_symbols]
+    prompt_lower = prompt_text.lower()
+    reasons = []
+
+    # Rule 0: Prompt text topology overrides
+    if 'cascad' in prompt_lower and ('decoder' in prompt_lower or 'encoder' in prompt_lower):
+        return {"verdict": "BROKEN", "reasons": ["Cascaded decoders/encoders: one-hot output cannot be used as binary address input. Topologically meaningless."]}
+
+    if ('separate' in prompt_lower or 'disconnected' in prompt_lower) and len(selected_symbols) > 1:
+        return {"verdict": "INCOMPLETE", "reasons": ["User described disconnected/separate components with no shared signals."]}
+
+    # Rule 1: Nonsensical pairs
+    decoder_count = sum(1 for s in selected_symbols if 'decoder' in s.name.lower() or 'dec' in s.name.lower())
+    encoder_count = sum(1 for s in selected_symbols if 'encoder' in s.name.lower() or 'prienc' in s.name.lower())
+
+    if decoder_count >= 2:
+        return {"verdict": "BROKEN", "reasons": ["Two decoders selected — decoder produces one-hot output, not a valid binary address for another decoder. Cascading is topologically meaningless."]}
+    if encoder_count >= 2:
+        return {"verdict": "BROKEN", "reasons": ["Two priority encoders selected — encoder output is too narrow to meaningfully feed another encoder."]}
+
+    # Rule 2: Sequential without clock
+    has_sequential = bool(sym_ids & SEQUENTIAL_IDS)
+    has_clock_source = bool(sym_ids & PROVIDES_CLOCK_IDS)
+    needs_clock = bool(sym_ids & NEEDS_CLOCK_IDS)
+
+    if needs_clock and not has_clock_source:
+        reasons.append(f"Sequential component(s) selected ({', '.join(sym_names)}) but no Clock Gen in selection. `input wire clk` is a REQUIREMENT, not a source.")
+        return {"verdict": "INCOMPLETE", "reasons": reasons}
+
+    # Rule 3: Needs-driving without drivers
+    needs_operands = bool(sym_ids & NEEDS_OPERANDS_IDS)
+    needs_address = bool(sym_ids & NEEDS_ADDRESS_IDS)
+    has_data_source = bool(sym_ids & PROVIDES_DATA_IDS)
+
+    if needs_operands and not has_data_source:
+        reasons.append("ALU needs operand sources and opcode driver — none selected.")
+        return {"verdict": "INCOMPLETE", "reasons": reasons}
+
+    if needs_address and not has_data_source:
+        reasons.append("Memory/ROM needs address driver from selection — none selected.")
+        return {"verdict": "INCOMPLETE", "reasons": reasons}
+
+    # Rule 4: All combinational standalone
+    all_combinational = sym_ids and not has_sequential
+    if all_combinational and not needs_operands and not needs_address:
+        reasons.append(f"All selected components are combinational: {', '.join(sym_names)}. No internal state, no clock needed.")
+        return {"verdict": "STANDALONE", "reasons": reasons}
+
+    # Rule 5: Sequential without clock (catch-all for rom, etc.)
+    if has_sequential and not has_clock_source:
+        reasons.append(f"Sequential/stateful component(s) without clock source in selection.")
+        return {"verdict": "INCOMPLETE", "reasons": reasons}
+
+    # Rule 6: Has clock source + sequential = potentially working
+    if has_clock_source and has_sequential:
+        if needs_address and not has_data_source:
+            reasons.append("Clock source present but memory has no address driver.")
+            return {"verdict": "INCOMPLETE", "reasons": reasons}
+        reasons.append("Clock source present, sequential components have driver.")
+        return {"verdict": "WORKING", "reasons": reasons}
+
+    # Default
+    reasons.append(f"Components: {', '.join(sym_names)}")
+    return {"verdict": "STANDALONE", "reasons": reasons}
 
 # Component classification for automatic dependency checking
 # COMBINATIONAL: no clock needed
@@ -800,101 +891,37 @@ async def chat(req: ChatRequest):
             if rule_id and rule_id in SYMBOL_BEHAVIOR_RULES:
                 context_parts.append(f"Rule for {sym.name}: {SYMBOL_BEHAVIOR_RULES[rule_id]}")
 
-        # Automatic dependency analysis
-        sym_ids = set()
-        all_known = COMBINATIONAL_IDS | SEQUENTIAL_IDS | NEEDS_OPERANDS_IDS
-        for sym in selected:
-            sid = sym.name.lower().replace(' ', '').replace('-', '').replace('_', '')
-            for known_id in all_known:
-                if known_id in sid or sid in known_id:
-                    sym_ids.add(known_id)
-                    break
+        # Compute verdict deterministically in Python
+        verdict_result = compute_verdict(selected, req.message)
+        locked_verdict = verdict_result["verdict"]
+        locked_reasons = verdict_result["reasons"]
 
-        has_sequential = bool(sym_ids & SEQUENTIAL_IDS)
-        all_combinational = sym_ids and not has_sequential
-        has_clock_source = bool(sym_ids & PROVIDES_CLOCK_IDS)
-        needs_clock = bool(sym_ids & NEEDS_CLOCK_IDS)
-        needs_operands = bool(sym_ids & NEEDS_OPERANDS_IDS)
-        needs_address = bool(sym_ids & NEEDS_ADDRESS_IDS)
-        has_data_source = bool(sym_ids & PROVIDES_DATA_IDS)
-        is_single_component = len(selected) == 1
+        # Determine if user is asking for validation vs explanation
+        is_validation_question = bool(VALIDATION_KEYWORDS.search(req.message))
 
-        # Build dependency warnings
-        # Check for nonsensical topologies
-        is_cascaded_decoders = sum(1 for s in selected if 'decoder' in s.name.lower() or 'dec' in s.name.lower()) >= 2
-        is_cascaded_encoders = sum(1 for s in selected if 'encoder' in s.name.lower() or 'prienc' in s.name.lower()) >= 2
-
-        dep_warnings = []
-        circuit_type = "COMBINATIONAL" if all_combinational else "SEQUENTIAL" if has_sequential else "MIXED"
-
-        if is_cascaded_decoders:
-            dep_warnings.append("BROKEN — Cascaded decoders: decoder produces one-hot output, not a valid binary address for another decoder. Nonsensical topology. Verdict must be BROKEN.")
-        elif is_cascaded_encoders:
-            dep_warnings.append("BROKEN — Cascaded priority encoders: encoder output too narrow to meaningfully feed another encoder. Verdict must be BROKEN.")
-        elif all_combinational:
-            # All combinational — but check if any need driving (ALU, ROM, etc.)
-            needs_driving_check = needs_operands or needs_address
-            if needs_driving_check:
-                if needs_operands:
-                    dep_warnings.append("INCOMPLETE — ALU selected alone needs operand sources and opcode driver. Verdict must be INCOMPLETE.")
-                if needs_address:
-                    dep_warnings.append("INCOMPLETE — ROM/memory selected needs address driver from user's selection. Verdict must be INCOMPLETE.")
-            else:
-                dep_warnings.append(f"STANDALONE: All selected components are combinational ({', '.join(sym_names)}). No clock needed. Verdict should be WORKING AS STANDALONE MODULE.")
-        else:
-            # Has sequential components — check dependencies
-            if needs_clock and not has_clock_source:
-                dep_warnings.append("INCOMPLETE — MISSING CLOCK SOURCE: Sequential components selected but no Clock Gen in selection. The testbench clock does NOT count. Verdict must be INCOMPLETE.")
-            if needs_operands and not has_data_source:
-                dep_warnings.append("INCOMPLETE — MISSING OPERAND SOURCES: ALU/comparator/adder needs register or data sources. Verdict must be INCOMPLETE.")
-            if needs_address:
-                dep_warnings.append("INCOMPLETE — MISSING ADDRESS/DATA DRIVERS: Memory needs address sources from user's selection. Verdict must be INCOMPLETE.")
-            if not dep_warnings and has_sequential and not has_clock_source:
-                dep_warnings.append(f"INCOMPLETE — Sequential component(s) without clock source in selection. Verdict must be INCOMPLETE.")
-
-        # Validation directive when user asks about correctness
-        if VALIDATION_KEYWORDS.search(req.message):
+        if is_validation_question:
+            # VERDICT LOCKED — model must use our computed verdict
             context_parts.append(STRICT_REVIEWER_PROMPT)
-
-            dep_text = "\n\nAUTOMATIC DEPENDENCY CHECK:\n"
-            dep_text += f"Circuit type: {circuit_type}\n"
-            dep_text += f"Components: {', '.join(sym_names)}\n"
-            if dep_warnings:
-                dep_text += "Findings:\n- " + "\n- ".join(dep_warnings)
-            else:
-                dep_text += "Findings: No missing dependencies detected."
-
-            # Pre-compute the expected verdict to guide the model
-            if any("STANDALONE" in w for w in dep_warnings):
-                expected_hint = "Expected verdict based on dependency check: WORKING AS STANDALONE MODULE"
-            elif any("INCOMPLETE" in w for w in dep_warnings):
-                expected_hint = "Expected verdict based on dependency check: INCOMPLETE"
-            else:
-                expected_hint = "No automatic verdict — analyze manually."
-
             context_parts.append(
-                f"{dep_text}\n\n"
-                f"{expected_hint}\n\n"
-                f"INSTRUCTIONS:\n"
-                f"1. The dependency check above has already determined the verdict. AGREE with it unless you find a specific error.\n"
-                f"2. If the check says INCOMPLETE, your verdict MUST be INCOMPLETE. Do not override it because the testbench works.\n"
-                f"3. If the check says STANDALONE, your verdict MUST be WORKING AS STANDALONE MODULE.\n"
-                f"4. After stating the verdict, explain WHY (missing clock, missing drivers, etc.).\n"
-                f"5. THEN verify the Verilog logic matches truth tables / functional rules.\n"
-                f"6. Give ONE final verdict line at the end: 'Final verdict: [VERDICT]'"
+                f"\nVERDICT LOCKED: {locked_verdict}\n"
+                f"REASONS:\n- " + "\n- ".join(locked_reasons) + "\n\n"
+                f"Your job is ONLY to explain why this verdict is correct. "
+                f"You MUST start your response with 'Final verdict: {locked_verdict}'. "
+                f"Do not contradict the verdict. Do not suggest a different verdict. "
+                f"Explain in 2-3 sentences why this verdict is correct based on the reasons above, "
+                f"then give a brief explanation of what the component(s) do.\n\n"
+                f"Do NOT second-guess the verdict. It has been computed from hard rules. "
+                f"Your role is explanation, not classification."
             )
         else:
-            # Even in non-validation mode, include dependency warnings and testbench rule
-            if dep_warnings:
-                context_parts.append(
-                    f"\nNote: The user's selected components have missing dependencies:\n- "
-                    + "\n- ".join(dep_warnings)
-                    + "\nMention this if relevant. Remember: the testbench is NOT part of the circuit."
-                )
+            # Normal explanation mode — include verdict info as context
             context_parts.append(
-                f"\nWhen explaining, reference truth tables to verify logic. "
-                f"Remember: the testbench provides signals for simulation only — "
+                f"\nCircuit analysis: verdict={locked_verdict}, reasons: {'; '.join(locked_reasons)}\n"
+                f"Mention this if relevant. The testbench provides signals for simulation only — "
                 f"it is not part of the user's circuit design."
+            )
+            context_parts.append(
+                f"\nWhen explaining, reference truth tables to verify logic."
             )
 
     system_context = "\n".join(context_parts)
