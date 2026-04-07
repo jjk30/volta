@@ -439,22 +439,51 @@ PROVIDES_DATA_IDS = {'reg', 'regfile', 'pc', 'ram', 'rom', 'dmem', 'imem'}
 STRICT_REVIEWER_PROMPT = """
 You are NOT a customer service agent. Do not be polite about flaws. Students benefit from honest critique, not false praise.
 
-VERDICT TIERS (use exactly one):
+VERDICT TIERS (use exactly one as your final verdict):
 - **WORKING**: Complete circuit with all signals driven by selected components.
-- **WORKING AS STANDALONE MODULE**: Single component correctly implemented but expects external drivers (typical for individual gates, MUXes, decoders). The testbench provides those, so simulation will work. As part of a larger circuit, inputs need to be connected to other components.
-- **INCOMPLETE**: Missing components needed to function (e.g. sequential without clock source, multi-component circuit with undriven signals).
-- **BROKEN**: Logical/syntactic errors that prevent correct operation.
-- **RISKY**: Has timing hazards, race conditions, or EE concerns that may cause issues.
+- **WORKING AS STANDALONE MODULE**: ONLY for single COMBINATIONAL components (gates, MUX, decoder, adder, comparator, shifter). These have no internal state and a testbench legitimately demonstrates their function.
+- **INCOMPLETE**: Missing components needed to function. This is the DEFAULT when in doubt.
+- **BROKEN**: Logical/syntactic errors or nonsensical topology.
+- **RISKY**: Timing hazards, race conditions, or EE concerns.
 
-STRICT VALIDATION RULES:
-- Only require a clock source if the user has selected one or more SEQUENTIAL components (flip-flops, registers, RAM, counters, FSMs). If ALL selected components are COMBINATIONAL (gates, MUX, decoder, adder, comparator), the design does NOT need a clock — never flag missing clock for combinational-only designs.
-- Declaring `input wire clk` is NOT a clock source. It means the module REQUIRES an external clock.
-- A single combinational component (AND gate, MUX, decoder, etc.) selected alone is WORKING AS STANDALONE MODULE — it correctly implements its truth table and a testbench can exercise it. Do NOT call it INCOMPLETE.
-- A single sequential component without a clock generator is INCOMPLETE — flag the missing clock.
-- Default when uncertain: INCOMPLETE, not WORKING.
+CRITICAL RULE — TESTBENCH IS NOT A COMPONENT:
+The testbench provides signals only for SIMULATION. It is not part of the user's circuit.
+When checking if a circuit is complete, look ONLY at the user's SELECTED components, not the testbench.
+- If user selected only a D flip-flop, the verdict is INCOMPLETE — even though the testbench drives clk for simulation. The flip-flop has no clock source IN THE SELECTION.
+- If user selected only a JK/T/SR flip-flop, latch, register, counter, RAM, FIFO, or any sequential element with no Clock Gen component selected → INCOMPLETE
+- The presence of `input wire clk` declares a CLOCK INPUT REQUIREMENT, not a clock source
+- The testbench providing #5 clk = ~clk is not a real clock source — it only exists during simulation
+
+STANDALONE RULE — only for COMBINATIONAL components:
+- AND, OR, NOT, NAND, NOR, XOR, XNOR, Buffer, Tri-state → STANDALONE (combinational, no state)
+- MUX (2:1, 4:1, 8:1), DEMUX → STANDALONE (combinational)
+- Decoder, Priority Encoder → STANDALONE (combinational)
+- Half Adder, Full Adder, Comparator, Shifter → STANDALONE (combinational)
+- Sign Extend → STANDALONE (combinational)
+These components have NO internal state. The testbench legitimately demonstrates them.
+
+NEEDS-DRIVING COMPONENTS — alone is ALWAYS INCOMPLETE:
+- ALU alone → INCOMPLETE (needs operand sources and opcode driver)
+- Register File alone → INCOMPLETE (needs address sources and clock)
+- ROM alone → INCOMPLETE (needs address driver from user's selection)
+- RAM alone → INCOMPLETE (needs address, data, write enable, clock)
+- Clock divider alone → INCOMPLETE (needs source clock input)
+- Program counter alone → INCOMPLETE (needs clock)
+- Instruction/Data memory alone → INCOMPLETE (needs address driver)
+- Any flip-flop alone (D, JK, T, SR) → INCOMPLETE (needs clock source)
+- Any register/counter alone → INCOMPLETE (needs clock source)
+
+NONSENSICAL TOPOLOGY DETECTION:
+- Two decoders chained (decoder output → decoder input): a decoder produces one-hot output, not a binary address. Cascading them is meaningless. → BROKEN
+- Two priority encoders chained: same problem in reverse. → BROKEN
+- Two memory elements with no addressing logic between them → INCOMPLETE
+- Two unrelated components with no shared signals (e.g. AND gate + JK flip-flop) → INCOMPLETE (disconnected, and FF still needs clock)
+- Instruction memory + Data memory together with no PC, ALU, register file → INCOMPLETE PARTIAL CPU
 
 CONSISTENCY RULE:
-You must give ONE final verdict at the end. Do not contradict yourself within a response. If you said INCOMPLETE earlier, the verdict must remain INCOMPLETE. If you initially flag an issue and then realize it was wrong, retract the issue explicitly with 'CORRECTION:' before giving the final verdict. Never end with both 'INCOMPLETE' and 'WORKING' in the same response.
+Give ONE final verdict. Do not contradict yourself. If you said INCOMPLETE, the verdict stays INCOMPLETE.
+
+FINAL OVERRIDE: If you find yourself saying 'the testbench provides X so the design works,' STOP. The testbench is not the design. The design is what the user selected from the symbol library. Re-evaluate using only the selected components. If they don't form a complete circuit on their own, the verdict is INCOMPLETE regardless of what the testbench does.
 """
 
 
@@ -764,14 +793,15 @@ async def chat(req: ChatRequest):
         circuit_type = "COMBINATIONAL" if all_combinational else "SEQUENTIAL" if has_sequential else "MIXED"
 
         if is_single_component and all_combinational:
-            # Single combinational component — standalone module, no warnings
-            dep_warnings.append(f"STANDALONE: Single combinational component ({sym_names[0]}). Correctly implemented as standalone module — testbench provides inputs.")
+            dep_warnings.append(f"STANDALONE: Single combinational component ({sym_names[0]}). Verdict should be WORKING AS STANDALONE MODULE.")
         elif needs_clock and not has_clock_source:
-            dep_warnings.append("MISSING CLOCK SOURCE: Sequential components selected (flip-flop, register, RAM) but no Clock Gen. Declaring `input wire clk` is NOT a clock source — it means the module REQUIRES an external clock.")
-        if needs_operands and not has_data_source and not is_single_component:
-            dep_warnings.append("MISSING OPERAND SOURCES: ALU/comparator/adder selected but no registers or data sources to drive operands.")
-        if needs_address and not has_data_source and not all_combinational:
-            dep_warnings.append("MISSING ADDRESS/DATA DRIVERS: Memory selected but no counters, registers, or logic to generate addresses and data.")
+            dep_warnings.append("INCOMPLETE — MISSING CLOCK SOURCE: Sequential components selected but no Clock Gen in selection. The testbench clock does NOT count. Verdict must be INCOMPLETE.")
+        if needs_operands and not has_data_source:
+            dep_warnings.append("INCOMPLETE — MISSING OPERAND SOURCES: ALU/comparator/adder needs register or data sources. Verdict must be INCOMPLETE.")
+        if needs_address and not all_combinational:
+            dep_warnings.append("INCOMPLETE — MISSING ADDRESS/DATA DRIVERS: Memory needs address sources from user's selection. Verdict must be INCOMPLETE.")
+        if is_single_component and not all_combinational and not has_clock_source:
+            dep_warnings.append(f"INCOMPLETE — Single sequential/needs-driving component ({sym_names[0]}) without required drivers. Verdict must be INCOMPLETE.")
 
         # Validation directive when user asks about correctness
         if VALIDATION_KEYWORDS.search(req.message):
@@ -785,27 +815,37 @@ async def chat(req: ChatRequest):
             else:
                 dep_text += "Findings: No missing dependencies detected."
 
+            # Pre-compute the expected verdict to guide the model
+            if any("STANDALONE" in w for w in dep_warnings):
+                expected_hint = "Expected verdict based on dependency check: WORKING AS STANDALONE MODULE"
+            elif any("INCOMPLETE" in w for w in dep_warnings):
+                expected_hint = "Expected verdict based on dependency check: INCOMPLETE"
+            else:
+                expected_hint = "No automatic verdict — analyze manually."
+
             context_parts.append(
                 f"{dep_text}\n\n"
-                f"When responding:\n"
-                f"1. FIRST report the dependency findings. Use the correct verdict tier.\n"
-                f"2. For single combinational components (gate, MUX, decoder alone): verdict is 'WORKING AS STANDALONE MODULE'.\n"
-                f"3. For sequential components without clock generator: verdict is 'INCOMPLETE'.\n"
-                f"4. THEN verify the Verilog matches truth tables / functional rules.\n"
-                f"5. Give ONE final verdict. Do NOT contradict yourself.\n"
-                f"6. Only say 'WORKING' if ALL dependencies satisfied AND logic correct."
+                f"{expected_hint}\n\n"
+                f"INSTRUCTIONS:\n"
+                f"1. The dependency check above has already determined the verdict. AGREE with it unless you find a specific error.\n"
+                f"2. If the check says INCOMPLETE, your verdict MUST be INCOMPLETE. Do not override it because the testbench works.\n"
+                f"3. If the check says STANDALONE, your verdict MUST be WORKING AS STANDALONE MODULE.\n"
+                f"4. After stating the verdict, explain WHY (missing clock, missing drivers, etc.).\n"
+                f"5. THEN verify the Verilog logic matches truth tables / functional rules.\n"
+                f"6. Give ONE final verdict line at the end: 'Final verdict: [VERDICT]'"
             )
         else:
-            # Even in non-validation mode, include dependency warnings
+            # Even in non-validation mode, include dependency warnings and testbench rule
             if dep_warnings:
                 context_parts.append(
                     f"\nNote: The user's selected components have missing dependencies:\n- "
                     + "\n- ".join(dep_warnings)
-                    + "\nMention this if relevant to the user's question."
+                    + "\nMention this if relevant. Remember: the testbench is NOT part of the circuit."
                 )
             context_parts.append(
-                f"\nWhen explaining, reference truth tables to verify logic and explain "
-                f"how the Verilog implements each component's expected behavior."
+                f"\nWhen explaining, reference truth tables to verify logic. "
+                f"Remember: the testbench provides signals for simulation only — "
+                f"it is not part of the user's circuit design."
             )
 
     system_context = "\n".join(context_parts)
