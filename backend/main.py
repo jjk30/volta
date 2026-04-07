@@ -415,7 +415,21 @@ VALIDATION_KEYWORDS = re.compile(
 )
 
 # Component classification for automatic dependency checking
-SELF_CONTAINED_IDS = {'clkgen'}  # Provide their own behavior, no external driver needed
+# COMBINATIONAL: no clock needed
+COMBINATIONAL_IDS = {
+    'and', 'or', 'not', 'nand', 'nor', 'xor', 'xnor', 'buffer', 'tristate',
+    'mux2', 'mux4', 'mux8', 'demux2', 'demux4',
+    'dec24', 'prienc',
+    'fulladd', 'halfadd', 'cmp', 'shifter', 'sext',
+}
+# SEQUENTIAL: clock REQUIRED
+SEQUENTIAL_IDS = {
+    'dff', 'jkff', 'tff', 'srlatch',
+    'reg', 'ram', 'regfile', 'pc', 'dmem', 'imem',
+    'clkgen', 'ctrl',
+}
+
+SELF_CONTAINED_IDS = {'clkgen'}
 NEEDS_CLOCK_IDS = {'dff', 'jkff', 'tff', 'reg', 'ram', 'regfile', 'pc', 'dmem'}
 NEEDS_OPERANDS_IDS = {'alu', 'cmp', 'fulladd', 'halfadd'}
 NEEDS_ADDRESS_IDS = {'ram', 'rom', 'regfile', 'dmem', 'imem'}
@@ -423,15 +437,24 @@ PROVIDES_CLOCK_IDS = {'clkgen'}
 PROVIDES_DATA_IDS = {'reg', 'regfile', 'pc', 'ram', 'rom', 'dmem', 'imem'}
 
 STRICT_REVIEWER_PROMPT = """
-You are NOT a customer service agent. Do not be polite about flaws. If the design is broken, say 'BROKEN' and explain why. If components are missing, say 'INCOMPLETE' and list what's missing. Students benefit from honest critique, not false praise.
+You are NOT a customer service agent. Do not be polite about flaws. Students benefit from honest critique, not false praise.
+
+VERDICT TIERS (use exactly one):
+- **WORKING**: Complete circuit with all signals driven by selected components.
+- **WORKING AS STANDALONE MODULE**: Single component correctly implemented but expects external drivers (typical for individual gates, MUXes, decoders). The testbench provides those, so simulation will work. As part of a larger circuit, inputs need to be connected to other components.
+- **INCOMPLETE**: Missing components needed to function (e.g. sequential without clock source, multi-component circuit with undriven signals).
+- **BROKEN**: Logical/syntactic errors that prevent correct operation.
+- **RISKY**: Has timing hazards, race conditions, or EE concerns that may cause issues.
 
 STRICT VALIDATION RULES:
-- Declaring `input wire clk` is NOT the same as having a clock source. A clock port means the module REQUIRES an external clock — it does not provide one.
-- A working circuit needs all signals to be DRIVEN by something concrete in the user's selected components.
-- If the user selected only memory + flip-flop with no clock generator component, the answer is: 'INCOMPLETE — missing clock source. You need to also select a Clock Gen component or provide an external clock.'
-- Default answer when uncertain: INCOMPLETE, not CORRECT.
-- Never say 'works as expected' unless you have verified each input has a source from the user's selected components.
-- Be blunt. Students need to learn what's missing, not get false reassurance.
+- Only require a clock source if the user has selected one or more SEQUENTIAL components (flip-flops, registers, RAM, counters, FSMs). If ALL selected components are COMBINATIONAL (gates, MUX, decoder, adder, comparator), the design does NOT need a clock — never flag missing clock for combinational-only designs.
+- Declaring `input wire clk` is NOT a clock source. It means the module REQUIRES an external clock.
+- A single combinational component (AND gate, MUX, decoder, etc.) selected alone is WORKING AS STANDALONE MODULE — it correctly implements its truth table and a testbench can exercise it. Do NOT call it INCOMPLETE.
+- A single sequential component without a clock generator is INCOMPLETE — flag the missing clock.
+- Default when uncertain: INCOMPLETE, not WORKING.
+
+CONSISTENCY RULE:
+You must give ONE final verdict at the end. Do not contradict yourself within a response. If you said INCOMPLETE earlier, the verdict must remain INCOMPLETE. If you initially flag an issue and then realize it was wrong, retract the issue explicitly with 'CORRECTION:' before giving the final verdict. Never end with both 'INCOMPLETE' and 'WORKING' in the same response.
 """
 
 
@@ -719,48 +742,58 @@ async def chat(req: ChatRequest):
 
         # Automatic dependency analysis
         sym_ids = set()
+        all_known = COMBINATIONAL_IDS | SEQUENTIAL_IDS | NEEDS_OPERANDS_IDS
         for sym in selected:
             sid = sym.name.lower().replace(' ', '').replace('-', '').replace('_', '')
-            for known_id in (NEEDS_CLOCK_IDS | SELF_CONTAINED_IDS | NEEDS_OPERANDS_IDS | NEEDS_ADDRESS_IDS | PROVIDES_CLOCK_IDS):
+            for known_id in all_known:
                 if known_id in sid or sid in known_id:
                     sym_ids.add(known_id)
                     break
 
+        has_sequential = bool(sym_ids & SEQUENTIAL_IDS)
+        all_combinational = sym_ids and not has_sequential
         has_clock_source = bool(sym_ids & PROVIDES_CLOCK_IDS)
         needs_clock = bool(sym_ids & NEEDS_CLOCK_IDS)
         needs_operands = bool(sym_ids & NEEDS_OPERANDS_IDS)
         needs_address = bool(sym_ids & NEEDS_ADDRESS_IDS)
         has_data_source = bool(sym_ids & PROVIDES_DATA_IDS)
-        all_need_driving = not bool(sym_ids & SELF_CONTAINED_IDS)
+        is_single_component = len(selected) == 1
 
         # Build dependency warnings
         dep_warnings = []
-        if needs_clock and not has_clock_source:
-            dep_warnings.append("MISSING CLOCK SOURCE: Sequential components selected (flip-flop, register, RAM, counter) but no Clock Gen. Declaring `input wire clk` is NOT a clock source — it means the module REQUIRES an external clock.")
-        if needs_operands and not has_data_source:
+        circuit_type = "COMBINATIONAL" if all_combinational else "SEQUENTIAL" if has_sequential else "MIXED"
+
+        if is_single_component and all_combinational:
+            # Single combinational component — standalone module, no warnings
+            dep_warnings.append(f"STANDALONE: Single combinational component ({sym_names[0]}). Correctly implemented as standalone module — testbench provides inputs.")
+        elif needs_clock and not has_clock_source:
+            dep_warnings.append("MISSING CLOCK SOURCE: Sequential components selected (flip-flop, register, RAM) but no Clock Gen. Declaring `input wire clk` is NOT a clock source — it means the module REQUIRES an external clock.")
+        if needs_operands and not has_data_source and not is_single_component:
             dep_warnings.append("MISSING OPERAND SOURCES: ALU/comparator/adder selected but no registers or data sources to drive operands.")
-        if needs_address and not has_data_source and len(sym_ids & NEEDS_ADDRESS_IDS) == len(sym_ids):
+        if needs_address and not has_data_source and not all_combinational:
             dep_warnings.append("MISSING ADDRESS/DATA DRIVERS: Memory selected but no counters, registers, or logic to generate addresses and data.")
 
         # Validation directive when user asks about correctness
         if VALIDATION_KEYWORDS.search(req.message):
             context_parts.append(STRICT_REVIEWER_PROMPT)
 
-            dep_text = ""
+            dep_text = "\n\nAUTOMATIC DEPENDENCY CHECK:\n"
+            dep_text += f"Circuit type: {circuit_type}\n"
+            dep_text += f"Components: {', '.join(sym_names)}\n"
             if dep_warnings:
-                dep_text = "\n\nAUTOMATIC DEPENDENCY CHECK RESULTS (tell the user about these):\n- " + "\n- ".join(dep_warnings)
+                dep_text += "Findings:\n- " + "\n- ".join(dep_warnings)
             else:
-                dep_text = "\n\nAutomatic dependency check: No obvious missing dependencies detected. Still verify manually."
+                dep_text += "Findings: No missing dependencies detected."
 
             context_parts.append(
-                f"\nVALIDATION MODE: Selected components: {', '.join(sym_names)}."
                 f"{dep_text}\n\n"
                 f"When responding:\n"
-                f"1. FIRST report the dependency check results above. If anything is MISSING, say 'INCOMPLETE' immediately.\n"
-                f"2. THEN check if the generated Verilog matches each component's expected behavior (truth tables or functional rules).\n"
-                f"3. Be explicit: say 'CORRECT' or 'INCORRECT' or 'INCOMPLETE' for each claim.\n"
-                f"4. If the design is broken, say 'BROKEN' and explain why. Do not soften the message.\n"
-                f"5. Only say 'COMPLETE and CORRECT' if ALL dependencies are satisfied AND all logic matches."
+                f"1. FIRST report the dependency findings. Use the correct verdict tier.\n"
+                f"2. For single combinational components (gate, MUX, decoder alone): verdict is 'WORKING AS STANDALONE MODULE'.\n"
+                f"3. For sequential components without clock generator: verdict is 'INCOMPLETE'.\n"
+                f"4. THEN verify the Verilog matches truth tables / functional rules.\n"
+                f"5. Give ONE final verdict. Do NOT contradict yourself.\n"
+                f"6. Only say 'WORKING' if ALL dependencies satisfied AND logic correct."
             )
         else:
             # Even in non-validation mode, include dependency warnings
