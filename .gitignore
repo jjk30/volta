@@ -4,3 +4,4 @@ __pycache__/
 # Eval suite results (private, not pushed)
 tests/eval_results.json
 tests/eval_logs/
+tests/validation_results.json
