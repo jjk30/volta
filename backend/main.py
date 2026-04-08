@@ -441,6 +441,48 @@ EXPLAIN_KEYWORDS = re.compile(
 )
 
 
+KEYWORD_TO_SYMBOL = [
+    # Order matters — more specific patterns first
+    ("d flip-flop", "dff"), ("d flipflop", "dff"), ("d flip flop", "dff"), ("dff", "dff"),
+    ("jk flip-flop", "jkff"), ("jk flipflop", "jkff"), ("jk flip flop", "jkff"),
+    ("t flip-flop", "tff"), ("t flipflop", "tff"), ("t flip flop", "tff"),
+    ("sr latch", "srlatch"),
+    ("register file", "regfile"),
+    ("register", "reg"),
+    ("program counter", "pc"),
+    ("instruction memory", "imem"), ("instr mem", "imem"),
+    ("data memory", "dmem"), ("data mem", "dmem"),
+    ("clock divider", "clkgen"), ("clock gen", "clkgen"),
+    ("priority encoder", "prienc"),
+    ("barrel shifter", "shifter"), ("shifter", "shifter"),
+    ("tri-state", "tristate"), ("tristate", "tristate"),
+    ("comparator", "cmp"),
+    ("half adder", "halfadd"),
+    ("full adder", "fulladd"), ("adder", "fulladd"),
+    ("decoder", "dec24"),
+    ("encoder", "prienc"),
+    ("multiplexer", "mux2"), ("mux", "mux2"),
+    ("demux", "demux2"), ("demultiplexer", "demux2"),
+    ("counter", "pc"),
+    ("ram", "ram"), ("rom", "rom"), ("fifo", "ram"),
+    ("alu", "alu"),
+    ("buffer", "buffer"),
+    ("and gate", "and"), ("or gate", "or"), ("not gate", "not"),
+    ("nand", "nand"), ("nor", "nor"), ("xor", "xor"), ("xnor", "xnor"),
+]
+
+
+def infer_symbols_from_text(text: str) -> list:
+    """Infer symbol IDs from prompt/design text when selectedSymbols is empty."""
+    text_lower = text.lower()
+    found = set()
+    for keyword, sym_id in KEYWORD_TO_SYMBOL:
+        if keyword in text_lower and sym_id not in found:
+            found.add(sym_id)
+    # Build minimal symbol objects
+    return [SelectedSymbolData(name=sid, promptText="", truthTable=None) for sid in found]
+
+
 def compute_verdict(selected_symbols: list, prompt_text: str = "") -> dict:
     """Deterministically compute the circuit verdict from selected symbols.
 
@@ -451,15 +493,44 @@ def compute_verdict(selected_symbols: list, prompt_text: str = "") -> dict:
     if not selected_symbols:
         return {"verdict": "STANDALONE", "reasons": ["No symbols selected — evaluating generated code only."]}
 
-    # Resolve symbol IDs via fuzzy name matching
+    # Resolve symbol IDs via name matching (longest match first to avoid false positives)
+    NAME_TO_ID = {
+        'and': 'and', 'or': 'or', 'not': 'not', 'nand': 'nand', 'nor': 'nor',
+        'xor': 'xor', 'xnor': 'xnor', 'buffer': 'buffer', 'tristate': 'tristate', 'tri-state': 'tristate',
+        'mux': 'mux2', '2:1mux': 'mux2', '4:1mux': 'mux4', '8:1mux': 'mux8',
+        'demux': 'demux2', '1:2demux': 'demux2', '1:4demux': 'demux4',
+        'decoder': 'dec24', '2:4decoder': 'dec24', 'priorityencoder': 'prienc', 'encoder': 'prienc',
+        'halfadder': 'halfadd', 'fulladder': 'fulladd', 'adder': 'fulladd',
+        'comparator': 'cmp', 'shifter': 'shifter', 'barrelshifter': 'shifter',
+        'signextend': 'sext', 'alu': 'alu',
+        'dflipflop': 'dff', 'dff': 'dff', 'jkflipflop': 'jkff', 'jkff': 'jkff',
+        'tflipflop': 'tff', 'tff': 'tff', 'srlatch': 'srlatch',
+        'register': 'reg', 'registerfile': 'regfile', 'regfile': 'regfile',
+        'ram': 'ram', 'rom': 'rom', 'fifo': 'ram',
+        'programcounter': 'pc', 'counter': 'pc', 'pc': 'pc',
+        'instructionmemory': 'imem', 'instrmem': 'imem', 'imem': 'imem',
+        'datamemory': 'dmem', 'datamem': 'dmem', 'dmem': 'dmem',
+        'clockgen': 'clkgen', 'clockgenerator': 'clkgen', 'clockdivider': 'clkgen', 'clkgen': 'clkgen',
+        'controlunit': 'ctrl', 'ctrl': 'ctrl',
+    }
+    # Sort by key length descending for longest-match-first
+    sorted_names = sorted(NAME_TO_ID.keys(), key=len, reverse=True)
+
     sym_ids = set()
-    all_known = COMBINATIONAL_IDS | SEQUENTIAL_IDS | NEEDS_OPERANDS_IDS
     for sym in selected_symbols:
         sid = sym.name.lower().replace(' ', '').replace('-', '').replace('_', '')
-        for known_id in all_known:
-            if known_id in sid or sid in known_id:
-                sym_ids.add(known_id)
+        matched = False
+        for name_key in sorted_names:
+            if name_key == sid or name_key in sid:
+                sym_ids.add(NAME_TO_ID[name_key])
+                matched = True
                 break
+        if not matched:
+            # Try reverse: is sid a substring of a known key?
+            for name_key in sorted_names:
+                if sid in name_key:
+                    sym_ids.add(NAME_TO_ID[name_key])
+                    break
 
     sym_names = [s.name for s in selected_symbols]
     prompt_lower = prompt_text.lower()
@@ -480,6 +551,11 @@ def compute_verdict(selected_symbols: list, prompt_text: str = "") -> dict:
         return {"verdict": "BROKEN", "reasons": ["Two decoders selected — decoder produces one-hot output, not a valid binary address for another decoder. Cascading is topologically meaningless."]}
     if encoder_count >= 2:
         return {"verdict": "BROKEN", "reasons": ["Two priority encoders selected — encoder output is too narrow to meaningfully feed another encoder."]}
+
+    # Rule 1b: Clock divider/generator alone needs a source clock input
+    if sym_ids == {'clkgen'} and len(selected_symbols) == 1:
+        reasons.append("Clock divider alone needs a source clock input — it divides an existing clock, it doesn't create one from nothing.")
+        return {"verdict": "INCOMPLETE", "reasons": reasons}
 
     # Rule 2: Sequential without clock
     has_sequential = bool(sym_ids & SEQUENTIAL_IDS)
@@ -851,8 +927,13 @@ async def chat(req: ChatRequest):
         sim_summary = _build_simulation_summary(req.simulation)
         context_parts.append(f"\n{sim_summary}")
 
-    # Inject context for ALL selected symbols
+    # Inject context for ALL selected symbols (or infer from text)
     selected = req.selectedSymbols or []
+    if not selected:
+        # Infer symbols from prompt + design text as backup
+        infer_text = f"{req.message} {req.design}"
+        selected = infer_symbols_from_text(infer_text)
+
     if selected:
         sym_names = [s.name for s in selected]
         context_parts.append(f"\nSelected components: {', '.join(sym_names)}")
@@ -899,29 +980,19 @@ async def chat(req: ChatRequest):
         # Determine if user is asking for validation vs explanation
         is_validation_question = bool(VALIDATION_KEYWORDS.search(req.message))
 
-        if is_validation_question:
-            # VERDICT LOCKED — model must use our computed verdict
+        # ALWAYS lock verdict when symbols are present and question involves analysis
+        if is_validation_question or len(selected) > 0:
             context_parts.append(STRICT_REVIEWER_PROMPT)
             context_parts.append(
                 f"\nVERDICT LOCKED: {locked_verdict}\n"
                 f"REASONS:\n- " + "\n- ".join(locked_reasons) + "\n\n"
-                f"Your job is ONLY to explain why this verdict is correct. "
                 f"You MUST start your response with 'Final verdict: {locked_verdict}'. "
                 f"Do not contradict the verdict. Do not suggest a different verdict. "
                 f"Explain in 2-3 sentences why this verdict is correct based on the reasons above, "
                 f"then give a brief explanation of what the component(s) do.\n\n"
                 f"Do NOT second-guess the verdict. It has been computed from hard rules. "
-                f"Your role is explanation, not classification."
-            )
-        else:
-            # Normal explanation mode — include verdict info as context
-            context_parts.append(
-                f"\nCircuit analysis: verdict={locked_verdict}, reasons: {'; '.join(locked_reasons)}\n"
-                f"Mention this if relevant. The testbench provides signals for simulation only — "
-                f"it is not part of the user's circuit design."
-            )
-            context_parts.append(
-                f"\nWhen explaining, reference truth tables to verify logic."
+                f"Your role is explanation, not classification. "
+                f"The testbench is NOT part of the circuit."
             )
 
     system_context = "\n".join(context_parts)
