@@ -87,6 +87,8 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
   const [loading, setLoading] = useState(false)
   const scrollRef = useRef(null)
   const processedAutoRef = useRef(null)
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -109,13 +111,15 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
 
   const sendMessage = async (text, isAuto = false) => {
     const userMsg = { role: 'user', content: text }
-    const currentMessages = [...messages, userMsg]
+    // Use ref to get latest messages (avoids stale closure after clear)
+    const latestMessages = messagesRef.current
+    const currentMessages = [...latestMessages, userMsg]
     setMessages(currentMessages)
     if (!isAuto) setInput('')
     setLoading(true)
 
     // Filter out divider messages for history sent to backend
-    const historyForBackend = messages.filter((m) => m.role !== 'divider')
+    const historyForBackend = latestMessages.filter((m) => m.role !== 'divider')
 
     try {
       const resp = await fetch(`${API_URL}/chat`, {
