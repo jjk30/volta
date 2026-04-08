@@ -242,19 +242,30 @@ function App() {
     setSelectedSymbols([])
     setPrompt('')
     setAutoPrompt('')
+    setDesign(DEFAULT_DESIGN)
   }, [])
 
-  // Build composite prompt from selectedSymbols
+  // Build composite prompt + Verilog preview from selectedSymbols
   useEffect(() => {
+    if (selectedSymbols.length === 0) return
+
+    // Build prompt
     let text = ''
     if (selectedSymbols.length === 1) {
       text = selectedSymbols[0].promptText || selectedSymbols[0].name
-    } else if (selectedSymbols.length > 1) {
+    } else {
       const names = selectedSymbols.map((s) => s.promptText?.replace(/^Design (a |an )?/i, '') || s.name)
       text = `Design a circuit that combines: ${names.join(', ')}. Connect them appropriately to form a working circuit.`
     }
     setAutoPrompt(text)
     setPrompt(text)
+
+    // Build Verilog preview from snippets
+    const snippets = selectedSymbols.map((s) =>
+      `// ${s.name}\n${s.verilog || '// (no snippet)'}`
+    )
+    const preview = `// === PREVIEW: click GENERATE to build the full module ===\n\n${snippets.join('\n\n')}\n`
+    setDesign(preview)
   }, [selectedSymbols])
 
   // Disconnect: if user manually edits prompt to differ from auto, clear symbols
