@@ -95,19 +95,27 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
     }
   }, [messages, loading])
 
-  // Handle auto-message when a new design is generated
+  // Handle auto-message when a new design is generated — clear history first
   useEffect(() => {
     if (!autoMessage || autoMessage === processedAutoRef.current) return
     processedAutoRef.current = autoMessage
-    sendMessage('Explain what we just built in detail', true)
+    // Clear old messages and add divider
+    setMessages([{ role: 'divider', content: '— New design generated —' }])
+    // Send auto-explain after a tick so the cleared state is committed
+    setTimeout(() => {
+      sendMessage('Explain what we just built in detail', true)
+    }, 50)
   }, [autoMessage])
 
   const sendMessage = async (text, isAuto = false) => {
     const userMsg = { role: 'user', content: text }
-    const newMessages = [...messages, userMsg]
-    setMessages(newMessages)
+    const currentMessages = [...messages, userMsg]
+    setMessages(currentMessages)
     if (!isAuto) setInput('')
     setLoading(true)
+
+    // Filter out divider messages for history sent to backend
+    const historyForBackend = messages.filter((m) => m.role !== 'divider')
 
     try {
       const resp = await fetch(`${API_URL}/chat`, {
@@ -117,7 +125,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
           message: text,
           design: design || '',
           testbench: testbench || '',
-          history: messages,
+          history: historyForBackend,
           simulation: simResult ? {
             signals: (simResult.signals || []).map(s => ({
               name: s.name,
@@ -140,9 +148,9 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
       }
       const data = await resp.json()
       console.log('[Volta Chat] Raw response:', JSON.stringify(data.response))
-      setMessages([...newMessages, { role: 'assistant', content: data.response }])
+      setMessages([...currentMessages, { role: 'assistant', content: data.response }])
     } catch (e) {
-      setMessages([...newMessages, {
+      setMessages([...currentMessages, {
         role: 'assistant',
         content: `Error: ${e.message}`,
       }])
@@ -219,6 +227,18 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
         )}
 
         {messages.map((msg, i) => (
+          msg.role === 'divider' ? (
+            <div key={i} style={{
+              textAlign: 'center',
+              color: '#333',
+              fontSize: '9px',
+              fontStyle: 'italic',
+              padding: '8px 0',
+              userSelect: 'none',
+            }}>
+              {msg.content}
+            </div>
+          ) : (
           <div
             key={i}
             style={{
@@ -315,6 +335,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
               </div>
             )}
           </div>
+          )
         ))}
 
         {loading && (
