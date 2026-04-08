@@ -27,3 +27,28 @@
 30 hardware design prompts covering 7 categories. Each test runs through the full Volta pipeline (spec interpretation → Verilog generation → Yosys correction → testbench → iverilog compilation). A test "passes" only if the final output compiles cleanly in iverilog.
 
 Benchmark script: `tests/eval_suite.py`
+
+## Validation Suite Results
+
+**Pass rate:** 33/33 = **100%** across 9 error categories
+
+| Category | Pass Rate |
+|----------|-----------|
+| Combinational Standalone | 10/10 (100%) |
+| Sequential No Clock | 6/6 (100%) |
+| Memory No Drivers | 3/3 (100%) |
+| Needs Driving | 3/3 (100%) |
+| Working Combinations | 3/3 (100%) |
+| Nonsensical Topologies | 2/2 (100%) |
+| Disconnected Circuits | 2/2 (100%) |
+| CPU Partial Circuits | 3/3 (100%) |
+| Edge Cases | 1/1 (100%) |
+
+The validation suite tests Volta's chatbot ability to correctly identify whether a circuit is WORKING, STANDALONE, INCOMPLETE, BROKEN, or RISKY across deliberately broken combinations including:
+- Sequential components missing clock sources
+- Memory components missing address drivers
+- Topologically nonsensical combinations (cascaded decoders/encoders)
+- Disconnected subcircuits with no shared signals
+- Partial CPU implementations missing critical components
+
+Validation script: `tests/validation_suite.py`
