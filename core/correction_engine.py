@@ -11,10 +11,10 @@ import re
 import sys
 import subprocess
 import tempfile
-import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from schema import SynthesisResult
+from llm_client import call_ollama
 
 
 # ---------------------------------------------------------------------------
@@ -174,25 +174,6 @@ Rules:
 # ---------------------------------------------------------------------------
 # Ollama interface
 # ---------------------------------------------------------------------------
-
-def call_ollama(prompt: str, model: str = "qwen2.5-coder:7b") -> str:
-    """Send a prompt to the local Ollama server."""
-
-    try:
-        resp = requests.post("http://localhost:11434/api/generate", json={
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.2, "num_predict": 2048},
-        }, timeout=120)
-        resp.raise_for_status()
-        return resp.json()["response"]
-    except requests.ConnectionError:
-        raise RuntimeError(
-            "Ollama not reachable at localhost:11434. "
-            "Start it with: ollama serve"
-        )
-
 
 def extract_verilog(raw: str) -> str:
     """Pull clean Verilog out of whatever the LLM returns."""
