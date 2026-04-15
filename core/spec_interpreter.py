@@ -13,7 +13,6 @@ import json
 import os
 import re
 import sys
-import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from schema import (
@@ -27,33 +26,7 @@ from schema import (
     SignalType,
     TestVector,
 )
-
-
-# ---------------------------------------------------------------------------
-# Ollama interface
-# ---------------------------------------------------------------------------
-
-OLLAMA_URL = "http://localhost:11434/api/generate"
-
-
-def call_ollama(prompt: str, model: str = "qwen2.5-coder:7b",
-                temperature: float = 0.2, max_tokens: int = 8192) -> str:
-    """Send a prompt to the local Ollama server."""
-
-    try:
-        resp = requests.post(OLLAMA_URL, json={
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": temperature, "num_predict": max_tokens},
-        }, timeout=180)
-        resp.raise_for_status()
-        return resp.json()["response"]
-    except requests.ConnectionError:
-        raise RuntimeError(
-            "Ollama not reachable at localhost:11434. "
-            "Start it with: ollama serve"
-        )
+from llm_client import call_ollama
 
 
 # ---------------------------------------------------------------------------
@@ -535,7 +508,7 @@ def interpret(prompt: str, model: str = "qwen2.5-coder:7b") -> DesignSpec:
         try:
             # Use higher temperature on retries for variety
             temp = 0.2 if attempt == 1 else 0.3 + (attempt * 0.1)
-            raw = call_ollama(filled_prompt, model=model, temperature=temp)
+            raw = call_ollama(filled_prompt, model=model, temperature=temp, num_predict=8192)
             print(f"  Raw response: {len(raw)} chars")
 
             raw_json = extract_json(raw)

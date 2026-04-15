@@ -106,9 +106,12 @@ function App() {
   const [rightWidth, setRightWidth] = useState(400)
   const [rightSplitPos, setRightSplitPos] = useState(50) // % for symbols vs chat
   const [selectedSymbols, setSelectedSymbols] = useState([])
-  const [autoPrompt, setAutoPrompt] = useState('') // tracks auto-generated prompt for disconnect detection
+  const [autoPrompt, setAutoPrompt] = useState('')
+  const [verifying, setVerifying] = useState(false)
+  const [verifyReport, setVerifyReport] = useState(null)
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
+  const verifyControllerRef = useRef(null)
   const designEditorRef = useRef(null)
 
   // --- Handlers ---
@@ -170,6 +173,32 @@ function App() {
   }, [])
 
   const handleCancelGenerate = useCallback(() => { generateControllerRef.current?.abort() }, [])
+
+  const handleVerify = useCallback(async () => {
+    const controller = new AbortController()
+    verifyControllerRef.current = controller
+    setVerifying(true)
+    setError(null)
+    setCancelled(null)
+    setVerifyReport(null)
+    try {
+      const resp = await fetch(`${API_URL}/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ design, prompt }),
+        signal: controller.signal,
+      })
+      if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`) }
+      const data = await resp.json()
+      setVerifyReport(data)
+      setBottomTab('VERIFY')
+    } catch (e) {
+      if (e.name === 'AbortError') { setCancelled('verify'); setTimeout(() => setCancelled(null), 2000) }
+      else setError(e.message)
+    } finally { setVerifying(false); verifyControllerRef.current = null }
+  }, [design, prompt])
+
+  const handleCancelVerify = useCallback(() => { verifyControllerRef.current?.abort() }, [])
 
   // Editor split
   const handleEditorSplit = useCallback((e) => {
@@ -279,6 +308,7 @@ function App() {
 
   const hasRealCode = (code) => code.replace(/\/\/.*$/gm, '').trim().length > 0
   const canSimulate = hasRealCode(design) && hasRealCode(testbench)
+  const canVerify = hasRealCode(design)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#000' }}>
@@ -296,6 +326,10 @@ function App() {
         setPrompt={handlePromptChange}
         cancelled={cancelled}
         canSimulate={canSimulate}
+        onVerify={handleVerify}
+        onCancelVerify={handleCancelVerify}
+        verifying={verifying}
+        canVerify={canVerify}
       />
       <ProgressIndicator active={generating} done={generateDone} />
 
@@ -334,7 +368,7 @@ function App() {
           {/* Bottom tabbed panel */}
           <HorizDragHandle onMouseDown={handleBottomResize} />
           <div style={{ height: `${bottomHeight}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <TabBar tabs={['CONSOLE', 'WAVEFORM', 'DIAGRAM', 'EXAMPLES']} active={bottomTab} onChange={setBottomTab} />
+            <TabBar tabs={['CONSOLE', 'WAVEFORM', 'DIAGRAM', 'VERIFY', 'EXAMPLES']} active={bottomTab} onChange={setBottomTab} />
             <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
               {bottomTab === 'CONSOLE' && (
                 <div style={{ height: '100%', overflow: 'auto', padding: '6px 12px', fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-dim)' }}>
@@ -358,6 +392,42 @@ function App() {
               )}
               {bottomTab === 'DIAGRAM' && (
                 <DiagramView design={design} />
+              )}
+              {bottomTab === 'VERIFY' && (
+                <div style={{ height: '100%', overflow: 'auto', padding: '12px 16px', fontSize: '12px', fontFamily: "'JetBrains Mono', monospace", color: '#aaa', lineHeight: '1.6' }}>
+                  {verifying && (
+                    <div style={{ color: 'var(--accent)', textAlign: 'center', padding: '20px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: '4px', marginBottom: '8px' }}>
+                        {[0,1,2].map(i => <span key={i} style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff41', animation: `pulse-dot 1.2s ease-in-out ${i*0.2}s infinite` }} />)}
+                      </div>
+                      Running AI verification...
+                    </div>
+                  )}
+                  {!verifying && !verifyReport && (
+                    <div style={{ color: '#333', textAlign: 'center', padding: '20px' }}>
+                      Generate a design, then click VERIFY to run AI-driven verification.
+                    </div>
+                  )}
+                  {!verifying && verifyReport && (
+                    <div>
+                      {verifyReport.summary?.total > 0 && (
+                        <div style={{ marginBottom: '12px', padding: '8px 12px', border: '1px solid #1a4a1a', borderRadius: '4px', background: '#001a00' }}>
+                          <span style={{ color: verifyReport.summary.failed > 0 ? '#ff4444' : '#00ff41', fontWeight: 600 }}>
+                            {verifyReport.summary.passed} of {verifyReport.summary.total} tests passed
+                          </span>
+                          {verifyReport.summary.failed > 0 && (
+                            <span style={{ color: '#ff4444', marginLeft: '12px' }}>
+                              ({verifyReport.summary.failed} failed)
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                        {verifyReport.report}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
               {bottomTab === 'EXAMPLES' && (
                 <div style={{

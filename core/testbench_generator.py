@@ -180,54 +180,53 @@ def run_testbench(
         test_code = generate_test_file(module)
         test_module_name = f"test_{module.name}"
 
-        # Create temp directory for the run
-        work_dir = tempfile.mkdtemp(prefix=f"volta_tb_{module.name}_")
+        # Create temp directory for the run (auto-cleanup via context manager)
+        with tempfile.TemporaryDirectory(prefix=f"volta_tb_{module.name}_") as work_dir:
+            test_path = os.path.join(work_dir, f"{test_module_name}.py")
+            with open(test_path, "w") as f:
+                f.write(test_code)
 
-        test_path = os.path.join(work_dir, f"{test_module_name}.py")
-        with open(test_path, "w") as f:
-            f.write(test_code)
+            makefile_path = os.path.join(work_dir, "Makefile")
+            makefile = generate_makefile(module.name, verilog_path, test_module_name)
+            with open(makefile_path, "w") as f:
+                f.write(makefile)
 
-        makefile_path = os.path.join(work_dir, "Makefile")
-        makefile = generate_makefile(module.name, verilog_path, test_module_name)
-        with open(makefile_path, "w") as f:
-            f.write(makefile)
+            full_log.append(f"[{module.name}] Work dir: {work_dir}")
+            full_log.append(f"[{module.name}] Test file: {test_path}")
+            full_log.append(f"[{module.name}] Running {len(module.test_vectors)} test(s)...")
 
-        full_log.append(f"[{module.name}] Work dir: {work_dir}")
-        full_log.append(f"[{module.name}] Test file: {test_path}")
-        full_log.append(f"[{module.name}] Running {len(module.test_vectors)} test(s)...")
+            print(f"\n  Running {len(module.test_vectors)} test(s) for: {module.name}")
+            print(f"  Work dir: {work_dir}")
 
-        print(f"\n  Running {len(module.test_vectors)} test(s) for: {module.name}")
-        print(f"  Work dir: {work_dir}")
+            # Run cocotb via make
+            try:
+                r = subprocess.run(
+                    ["make", "-C", work_dir],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                )
+                output = r.stdout + r.stderr
+                full_log.append(output)
+            except subprocess.TimeoutExpired:
+                msg = f"[{module.name}] Simulation timed out after 120s"
+                full_log.append(msg)
+                total += len(module.test_vectors)
+                failed += len(module.test_vectors)
+                failures.append({"module": module.name, "error": msg})
+                continue
 
-        # Run cocotb via make
-        try:
-            r = subprocess.run(
-                ["make", "-C", work_dir],
-                capture_output=True,
-                text=True,
-                timeout=120,
-                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            # Parse cocotb results from XML (must happen before context exits)
+            results_xml = os.path.join(work_dir, "results.xml")
+            module_total, module_pass, module_fail, module_failures = (
+                parse_results_xml(results_xml, module.name)
             )
-            output = r.stdout + r.stderr
-            full_log.append(output)
-        except subprocess.TimeoutExpired:
-            msg = f"[{module.name}] Simulation timed out after 120s"
-            full_log.append(msg)
-            total += len(module.test_vectors)
-            failed += len(module.test_vectors)
-            failures.append({"module": module.name, "error": msg})
-            continue
 
-        # Parse cocotb results from XML (much more reliable than stdout)
-        results_xml = os.path.join(work_dir, "results.xml")
-        module_total, module_pass, module_fail, module_failures = (
-            parse_results_xml(results_xml, module.name)
-        )
-
-        total += module_total
-        passed += module_pass
-        failed += module_fail
-        failures.extend(module_failures)
+            total += module_total
+            passed += module_pass
+            failed += module_fail
+            failures.extend(module_failures)
 
     return SimulationResult(
         success=(failed == 0 and total > 0),

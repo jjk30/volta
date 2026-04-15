@@ -25,7 +25,8 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from schema import DesignSpec, ModuleSpec, PortDirection, SignalType
 from spec_interpreter import interpret, _sanitize_identifier, _guess_module_name
-from rtl_generator import call_ollama, extract_verilog
+from rtl_generator import extract_verilog
+from llm_client import call_ollama
 from correction_engine import correct as correct_verilog, run_yosys
 
 

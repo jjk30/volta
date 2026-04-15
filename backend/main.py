@@ -28,9 +28,15 @@ logger = logging.getLogger("volta.backend")
 
 app = FastAPI(title="Volta", version="0.1.0")
 
+# TODO: Update with production frontend URL when deploying
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1074,6 +1080,274 @@ async def chat(req: ChatRequest):
         reply = _truncate_short(reply)
 
     return ChatResponse(response=reply)
+
+
+# ---------------------------------------------------------------------------
+# Verify endpoint — AI-first comprehensive verification
+# ---------------------------------------------------------------------------
+
+class VerifyRequest(BaseModel):
+    design: str
+    prompt: str = ""
+
+
+class VerifyBug(BaseModel):
+    test_name: str = ""
+    description: str = ""
+    expected: str = ""
+    actual: str = ""
+
+
+class VerifyResponse(BaseModel):
+    report: str
+    summary: dict = {}  # { total, passed, failed }
+    bugs: list[VerifyBug] = []
+    coverage_gaps: list[str] = []
+    raw_testbench: str = ""
+
+
+VERIFY_TEST_PLAN_PROMPT = """You are a hardware verification engineer. Given this Verilog design and its purpose, generate a COMPREHENSIVE Verilog testbench that tests:
+
+1. NORMAL OPERATION: 5-8 typical input combinations
+2. EDGE CASES: all-zeros, all-ones, alternating bits, single-bit patterns
+3. BOUNDARY CONDITIONS: overflow, underflow, max/min values
+4. RESET BEHAVIOR: reset during active operation, reset release
+5. CORNER CASES: rapid input changes, simultaneous transitions
+
+Design purpose: {prompt}
+
+Design code:
+```verilog
+{design}
+```
+
+Rules:
+1. Module name must be `tb_verify` (no ports)
+2. Declare all DUT inputs as `reg`, outputs as `wire`
+3. Instantiate the DUT as `uut`
+4. Include `$dumpfile("dump.vcd");` and `$dumpvars(0, tb_verify);`
+5. For EACH test, use `$display("TEST <name>: <result>");` where result is PASS or FAIL
+6. Compare actual outputs to expected values using if/else
+7. Track pass/fail counts with integer variables
+8. At the end, `$display("SUMMARY: %0d of %0d tests passed", pass_count, total_count);`
+9. End with `$finish;`
+10. Use `#10;` delays between tests
+11. For sequential designs, generate a clock: `always #5 clk = ~clk;`
+12. Return ONLY Verilog. Start with `module` and end with `endmodule`. No explanation."""
+
+
+VERIFY_REPORT_PROMPT = """You are a hardware verification report writer. Analyze these simulation results and write a PLAIN ENGLISH verification report.
+
+Design purpose: {prompt}
+
+Design code:
+```verilog
+{design}
+```
+
+Testbench:
+```verilog
+{testbench}
+```
+
+Simulation output:
+```
+{sim_output}
+```
+
+Write a report with these sections:
+
+## PASS/FAIL Summary
+State how many tests passed out of total. Use the SUMMARY line from simulation output.
+
+## Bug Report
+For each FAIL result, explain in plain English:
+- What was being tested
+- What the expected behavior was
+- What actually happened
+- Why this matters
+
+If all tests passed, say "No bugs detected."
+
+## Coverage Gaps
+List things that WEREN'T tested but SHOULD have been, based on the design type. Be specific.
+For example: "Overflow behavior when counter reaches max value was not tested" or "Clock gating scenarios were not covered."
+
+## Recommendation
+One concrete suggestion to improve the design or testing.
+
+Keep the report concise and technical. Use markdown formatting."""
+
+
+@app.post("/verify", response_model=VerifyResponse)
+async def verify(req: VerifyRequest):
+    """AI-first comprehensive verification: generate tests, run, report."""
+
+    if not req.design.strip() or "module" not in req.design:
+        return VerifyResponse(
+            report="Generate a design first, then click VERIFY to run AI-driven verification.",
+            summary={"total": 0, "passed": 0, "failed": 0},
+        )
+
+    import requests as http_requests
+
+    # Step 1: Generate comprehensive testbench via Ollama
+    test_prompt = VERIFY_TEST_PLAN_PROMPT.format(
+        prompt=req.prompt or "hardware design",
+        design=req.design,
+    )
+
+    try:
+        resp = http_requests.post("http://localhost:11434/api/generate", json={
+            "model": "qwen2.5-coder:7b",
+            "prompt": test_prompt,
+            "stream": False,
+            "options": {"temperature": 0.2, "num_predict": 4096},
+        }, timeout=180)
+        resp.raise_for_status()
+        raw_tb = resp.json()["response"].strip()
+    except Exception as e:
+        return VerifyResponse(
+            report=f"Failed to generate test plan: {e}. Is Ollama running?",
+            summary={"total": 0, "passed": 0, "failed": 0},
+        )
+
+    # Extract clean Verilog from LLM response
+    testbench = raw_tb
+    if "```" in testbench:
+        parts = testbench.split("```")
+        for part in parts[1::2]:
+            lines = part.strip().split("\n")
+            if lines and lines[0].strip().lower() in ("verilog", "v", "sv", ""):
+                part = "\n".join(lines[1:])
+            if "module" in part:
+                testbench = part.strip()
+                break
+    start = testbench.find("module ")
+    if start != -1:
+        testbench = testbench[start:]
+    end = testbench.rfind("endmodule")
+    if end != -1:
+        testbench = testbench[:end + len("endmodule")]
+
+    # Ensure VCD dump
+    if "$dumpfile" not in testbench:
+        inject = '\n  initial begin\n    $dumpfile("dump.vcd");\n    $dumpvars(0, tb_verify);\n  end\n'
+        idx = testbench.find("\n", testbench.find("tb_verify"))
+        if idx != -1:
+            testbench = testbench[:idx+1] + inject + testbench[idx+1:]
+
+    # Step 2: Compile and run with iverilog
+    sim_output = ""
+    sim_stderr = ""
+    try:
+        with tempfile.TemporaryDirectory(prefix="volta_verify_") as work_dir:
+            d_path = os.path.join(work_dir, "design.v")
+            t_path = os.path.join(work_dir, "tb_verify.v")
+            out_path = os.path.join(work_dir, "sim.out")
+
+            with open(d_path, "w") as f:
+                f.write(req.design)
+            with open(t_path, "w") as f:
+                f.write(testbench)
+
+            # Compile
+            compile_r = subprocess.run(
+                ["iverilog", "-o", out_path, d_path, t_path],
+                capture_output=True, text=True, timeout=30,
+            )
+
+            if compile_r.returncode != 0:
+                sim_output = f"COMPILATION FAILED:\n{compile_r.stderr}"
+                sim_stderr = compile_r.stderr
+            else:
+                # Simulate
+                sim_r = subprocess.run(
+                    ["vvp", out_path],
+                    capture_output=True, text=True, timeout=120,
+                    cwd=work_dir,
+                )
+                sim_output = sim_r.stdout
+                sim_stderr = sim_r.stderr
+
+    except subprocess.TimeoutExpired:
+        sim_output = "SIMULATION TIMED OUT after 120 seconds."
+    except FileNotFoundError:
+        sim_output = "iverilog not found. Install with: brew install icarus-verilog"
+    except Exception as e:
+        sim_output = f"Simulation error: {e}"
+
+    # Step 3: Parse pass/fail from simulation output
+    total = 0
+    passed = 0
+    failed = 0
+    bugs = []
+
+    for line in sim_output.split("\n"):
+        if "TEST " in line:
+            total += 1
+            if "PASS" in line.upper():
+                passed += 1
+            elif "FAIL" in line.upper():
+                failed += 1
+                bugs.append(VerifyBug(
+                    test_name=line.strip(),
+                    description=line.strip(),
+                ))
+
+    # Check for SUMMARY line
+    for line in sim_output.split("\n"):
+        if "SUMMARY:" in line.upper():
+            import re as _re
+            m = _re.search(r'(\d+)\s+of\s+(\d+)', line)
+            if m:
+                passed = int(m.group(1))
+                total = int(m.group(2))
+                failed = total - passed
+
+    summary = {"total": total, "passed": passed, "failed": failed}
+
+    # Step 4: Generate plain English report via Ollama
+    report_prompt = VERIFY_REPORT_PROMPT.format(
+        prompt=req.prompt or "hardware design",
+        design=req.design,
+        testbench=testbench,
+        sim_output=sim_output[:3000],  # cap context
+    )
+
+    try:
+        resp = http_requests.post("http://localhost:11434/api/generate", json={
+            "model": "qwen2.5-coder:7b",
+            "prompt": report_prompt,
+            "stream": False,
+            "options": {"temperature": 0.3, "num_predict": 2048},
+        }, timeout=120)
+        resp.raise_for_status()
+        report = resp.json()["response"].strip()
+    except Exception as e:
+        report = f"## Verification Results\n\n{passed} of {total} tests passed.\n\nFailed to generate detailed report: {e}"
+
+    # Strip model tokens
+    for token in ["<|EOT|>", "<|endoftext|>", "<|end_of_sentence|>"]:
+        report = report.replace(token, "")
+    report = re.sub(r'<\|?(?:EOT|endoftext|begin_of_sentence|end_of_sentence)\|?>', '', report, flags=re.I).strip()
+
+    # Coverage gaps (extract from report or generate)
+    coverage_gaps = []
+    if "coverage gap" in report.lower() or "not tested" in report.lower():
+        for line in report.split("\n"):
+            if "not tested" in line.lower() or "not covered" in line.lower() or "gap" in line.lower():
+                stripped = line.strip().lstrip("-*• ")
+                if stripped and len(stripped) > 10:
+                    coverage_gaps.append(stripped)
+
+    return VerifyResponse(
+        report=report,
+        summary=summary,
+        bugs=bugs,
+        coverage_gaps=coverage_gaps,
+        raw_testbench=testbench,
+    )
 
 
 @app.get("/health")

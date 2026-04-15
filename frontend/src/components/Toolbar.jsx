@@ -22,9 +22,11 @@ export default function Toolbar({
   onSimulate, onCancelSimulate, simulating,
   error, hasResult,
   onGenerate, onCancelGenerate, generating,
+  onVerify, onCancelVerify, verifying,
   prompt, setPrompt,
   cancelled,
   canSimulate = true,
+  canVerify = false,
 }) {
 
   const handleGenerate = () => {
@@ -219,6 +221,53 @@ export default function Toolbar({
         >
           <span style={{ fontSize: '10px' }}>&#9654;</span>
           SIM
+        </button>
+      )}
+
+      {/* Verify button */}
+      {verifying ? (
+        <button
+          onClick={onCancelVerify}
+          style={{
+            padding: '3px 10px',
+            border: '1px solid #ff4444',
+            borderRadius: '3px',
+            background: 'transparent',
+            color: '#ff4444',
+            fontSize: '11px',
+            fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
+          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
+        >
+          CANCEL
+        </button>
+      ) : (
+        <button
+          onClick={onVerify}
+          disabled={!canVerify}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '3px 10px',
+            border: `1px solid ${canVerify ? 'var(--accent)' : 'var(--border)'}`,
+            borderRadius: '3px',
+            background: 'transparent',
+            color: canVerify ? 'var(--accent)' : '#333',
+            fontSize: '11px',
+            fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            cursor: canVerify ? 'pointer' : 'default',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { if (canVerify) { e.target.style.background = 'var(--accent)'; e.target.style.color = '#000' } }}
+          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = canVerify ? 'var(--accent)' : '#333' }}
+        >
+          VERIFY
         </button>
       )}
 

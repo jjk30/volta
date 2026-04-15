@@ -8,10 +8,10 @@ import os
 import sys
 import subprocess
 import tempfile
-import requests
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from schema import DesignSpec, ModuleSpec, PortDirection, SignalType
+from llm_client import call_ollama
 
 
 def build_prompt(module: ModuleSpec) -> str:
@@ -50,19 +50,6 @@ Rules:
 6. Module name must be exactly: {module.name}
 
 Return ONLY Verilog. Start with `module` and end with `endmodule`. No explanation."""
-
-
-def call_ollama(prompt: str, model: str = "qwen2.5-coder:7b") -> str:
-    """Send a prompt to the local Ollama server."""
-
-    resp = requests.post("http://localhost:11434/api/generate", json={
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"temperature": 0.2, "num_predict": 2048},
-    })
-    resp.raise_for_status()
-    return resp.json()["response"]
 
 
 def extract_verilog(raw: str, module_name: str) -> str:

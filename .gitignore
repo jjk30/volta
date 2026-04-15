@@ -5,3 +5,4 @@ __pycache__/
 tests/eval_results.json
 tests/eval_logs/
 tests/validation_results.json
+data/training_logs/
