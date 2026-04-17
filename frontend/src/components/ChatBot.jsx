@@ -49,13 +49,13 @@ function CopyButton({ text, absolute = false }) {
       onMouseLeave={(e) => { if (!copied) e.currentTarget.style.opacity = '0.4' }}
     >
       {copied ? (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M3 8.5L6 11.5L13 4.5" stroke="#00ff41" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ color: 'var(--accent-primary)' }}>
+          <path d="M3 8.5L6 11.5L13 4.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       ) : (
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <rect x="5" y="5" width="8" height="8" rx="1" stroke="#666" strokeWidth="1.5" />
-          <path d="M3 11V3C3 2.45 3.45 2 4 2H10" stroke="#666" strokeWidth="1.5" strokeLinecap="round" />
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ color: 'var(--text-dim)' }}>
+          <rect x="5" y="5" width="8" height="8" rx="1" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M3 11V3C3 2.45 3.45 2 4 2H10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
       )}
     </button>
@@ -188,7 +188,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: '#000',
+        background: 'var(--bg-primary)',
         fontFamily: "'JetBrains Mono', monospace",
       }}
     >
@@ -196,10 +196,10 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
       <div style={{
         padding: '3px 12px',
         fontSize: '11px',
-        color: 'var(--accent)',
+        color: 'var(--accent-primary)',
         fontWeight: 500,
         background: 'var(--toolbar-bg)',
-        borderBottom: '1px solid var(--border)',
+        borderBottom: '1px solid var(--border-primary)',
         letterSpacing: '1px',
         flexShrink: 0,
       }}>
@@ -220,7 +220,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
       >
         {messages.length === 0 && !loading && (
           <div style={{
-            color: '#333',
+            color: 'var(--text-dim)',
             fontSize: '11px',
             textAlign: 'center',
             padding: '20px 10px',
@@ -234,7 +234,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
           msg.role === 'divider' ? (
             <div key={i} style={{
               textAlign: 'center',
-              color: '#333',
+              color: 'var(--text-dim)',
               fontSize: '9px',
               fontStyle: 'italic',
               padding: '8px 0',
@@ -253,9 +253,9 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
             <div style={{
               padding: '6px 10px',
               borderRadius: '4px',
-              border: `1px solid ${msg.role === 'user' ? 'var(--accent)' : '#222'}`,
-              background: msg.role === 'user' ? '#001a00' : '#0a0a0a',
-              color: msg.role === 'user' ? 'var(--accent)' : '#aaa',
+              border: `1px solid ${msg.role === 'user' ? 'var(--accent-primary)' : 'var(--border-primary)'}`,
+              background: msg.role === 'user' ? 'var(--chat-user-bg)' : 'var(--chat-assistant-bg)',
+              color: msg.role === 'user' ? 'var(--chat-user-text)' : 'var(--chat-assistant-text)',
               fontSize: '11px',
               lineHeight: '1.5',
               wordBreak: 'break-word',
@@ -283,13 +283,13 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
                       <div style={{ position: 'relative', margin: '4px 0' }}>
                         <CopyButton text={codeText} absolute />
                         <pre style={{
-                          background: '#0a1a0a',
-                          border: '1px solid #1a4a1a',
+                          background: 'var(--code-bg)',
+                          border: '1px solid var(--code-border)',
                           borderRadius: '3px',
                           padding: '6px 28px 6px 8px',
                           overflow: 'auto',
                           fontSize: '10px',
-                          color: '#ccc',
+                          color: 'var(--text-primary)',
                           margin: 0,
                         }}>{children}</pre>
                       </div>
@@ -299,17 +299,17 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
                     // If inside a <pre> (block code), render as-is
                     const isBlock = !inline && className
                     if (isBlock) {
-                      return <code style={{ color: '#ccc' }} {...props}>{children}</code>
+                      return <code style={{ color: 'var(--text-primary)' }} {...props}>{children}</code>
                     }
                     // Everything else: compact inline code
                     return (
                       <code style={{
-                        background: '#0a1a0a',
+                        background: 'var(--code-bg)',
                         padding: '2px 6px',
                         borderRadius: '2px',
                         fontSize: '0.85em',
-                        border: '1px solid #1a4a1a',
-                        color: 'var(--accent)',
+                        border: '1px solid var(--code-border)',
+                        color: 'var(--accent-primary)',
                         display: 'inline',
                         whiteSpace: 'nowrap',
                       }} {...props}>{children}</code>
@@ -347,8 +347,8 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
             alignSelf: 'flex-start',
             padding: '8px 12px',
             borderRadius: '4px',
-            border: '1px solid #222',
-            background: '#0a0a0a',
+            border: '1px solid var(--border-primary)',
+            background: 'var(--bg-surface)',
           }}>
             <ThinkingDots />
           </div>
@@ -360,8 +360,8 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
         display: 'flex',
         gap: '6px',
         padding: '6px 8px',
-        borderTop: '1px solid var(--border)',
-        background: '#050505',
+        borderTop: '1px solid var(--border-primary)',
+        background: 'var(--toolbar-bg)',
         flexShrink: 0,
       }}>
         <input
@@ -373,15 +373,15 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
           disabled={loading}
           style={{
             flex: 1,
-            background: '#000',
-            border: '1px solid var(--border)',
+            background: 'var(--bg-primary)',
+            border: '1px solid var(--border-primary)',
             borderRadius: '3px',
             padding: '4px 8px',
             color: 'var(--text-primary)',
             fontSize: '11px',
             fontFamily: "'JetBrains Mono', monospace",
             outline: 'none',
-            caretColor: 'var(--accent)',
+            caretColor: 'var(--accent-primary)',
           }}
         />
         <button
@@ -389,10 +389,10 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
           disabled={loading || !input.trim()}
           style={{
             padding: '4px 10px',
-            border: '1px solid var(--accent)',
+            border: '1px solid var(--accent-primary)',
             borderRadius: '3px',
             background: 'transparent',
-            color: 'var(--accent)',
+            color: 'var(--accent-primary)',
             fontSize: '11px',
             fontWeight: 600,
             fontFamily: "'JetBrains Mono', monospace",
@@ -402,13 +402,13 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
           }}
           onMouseEnter={(e) => {
             if (!loading && input.trim()) {
-              e.target.style.background = 'var(--accent)'
-              e.target.style.color = '#000'
+              e.target.style.background = 'var(--accent-primary)'
+              e.target.style.color = 'var(--bg-primary)'
             }
           }}
           onMouseLeave={(e) => {
             e.target.style.background = 'transparent'
-            e.target.style.color = 'var(--accent)'
+            e.target.style.color = 'var(--accent-primary)'
           }}
         >
           SEND

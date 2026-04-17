@@ -1,5 +1,5 @@
 import { useRef, useEffect, useImperativeHandle, forwardRef } from 'react'
-import { EditorState } from '@codemirror/state'
+import { EditorState, Compartment } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { bracketMatching, indentOnInput, StreamLanguage } from '@codemirror/language'
@@ -7,15 +7,26 @@ import { closeBrackets, closeBracketsKeymap, autocompletion } from '@codemirror/
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { linter } from '@codemirror/lint'
 import { verilog } from '@codemirror/legacy-modes/mode/verilog'
-import { oneDark } from './oneDarkTheme.js'
+import { themeFor } from './oneDarkTheme.js'
 import { verilogLint } from './verilogLinter.js'
 import { verilogCompletion } from './verilogComplete.js'
+
+// Read the current theme off the root <html> element so a fresh editor
+// picks up the user's persisted choice before React wires up props.
+function readCurrentTheme() {
+  if (typeof document === 'undefined') return 'dark'
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+}
 
 const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
   const containerRef = useRef(null)
   const viewRef = useRef(null)
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
+
+  // Compartment for the syntax-highlighting theme so we can swap it without
+  // tearing down the editor (which would clobber cursor/undo state).
+  const themeCompartment = useRef(new Compartment()).current
 
   // Expose imperative helpers to parent via ref
   useImperativeHandle(ref, () => ({
@@ -53,6 +64,8 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
       }
     })
 
+    const initialTheme = readCurrentTheme()
+
     const state = EditorState.create({
       doc: value,
       extensions: [
@@ -65,7 +78,7 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
         indentOnInput(),
         highlightSelectionMatches(),
         StreamLanguage.define(verilog),
-        oneDark,
+        themeCompartment.of(themeFor(initialTheme)),
         updateListener,
 
         // Verilog linter — 500ms debounce
@@ -86,57 +99,9 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
         ]),
         EditorView.theme({
           '&': { height: '100%' },
-
-          // Lint underlines: colors handled by index.css with SVG overrides
-
-          // Lint hover tooltip
-          '.cm-tooltip-hover, .cm-tooltip-lint, .cm-tooltip': {
-            backgroundColor: '#0a0a0a !important',
-            border: '1px solid #1a4a1a !important',
-            color: '#ccc !important',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-            borderRadius: '3px',
-          },
-          '.cm-diagnostic': {
-            padding: '3px 8px',
-            borderLeft: 'none',
-          },
-          '.cm-diagnostic-error': {
-            borderLeft: '3px solid #ff4444 !important',
-            paddingLeft: '8px',
-          },
-          '.cm-diagnostic-warning': {
-            borderLeft: '3px solid #ffaa00 !important',
-            paddingLeft: '8px',
-          },
-
-          // Hide the persistent inline lint panel if it appears
-          '.cm-panel-lint': { display: 'none !important' },
-          // Autocomplete popup
-          '.cm-tooltip-autocomplete': {
-            backgroundColor: '#0a0a0a !important',
-            border: '1px solid #1a4a1a !important',
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: '11px',
-          },
-          '.cm-tooltip-autocomplete > ul': {
-            fontFamily: "'JetBrains Mono', monospace",
-          },
-          '.cm-tooltip-autocomplete > ul > li': {
-            color: '#888',
-            padding: '2px 8px',
-          },
-          '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-            backgroundColor: '#001a00 !important',
-            color: '#00ff41 !important',
-          },
-          // Completion icons by type
-          '.cm-completionIcon-keyword::after': { content: '"K"', color: '#00ff41' },
-          '.cm-completionIcon-variable::after': { content: '"S"', color: '#4ec9b0' },
-          '.cm-completionIcon-text::after': { content: '">"', color: '#d4a017' },
-          '.cm-completionDetail': { color: '#444', marginLeft: '8px', fontStyle: 'italic' },
-          '.cm-completionLabel': { color: '#ccc' },
+          // All theme-specific colors come from index.css via CSS variables
+          // (on .cm-tooltip, .cm-gutters, etc.) and the syntax theme extension
+          // above — this theme object only sets layout-related rules.
         }),
       ],
     })
@@ -148,7 +113,21 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
 
     viewRef.current = view
 
+    // Watch for data-theme changes on <html> and swap the syntax theme
+    // via the compartment so it takes effect without remounting.
+    const observer = new MutationObserver(() => {
+      const next = readCurrentTheme()
+      view.dispatch({
+        effects: themeCompartment.reconfigure(themeFor(next)),
+      })
+    })
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    })
+
     return () => {
+      observer.disconnect()
       view.destroy()
     }
     // Only run once on mount

@@ -688,7 +688,7 @@ export default function SchematicView({ design, hasErrors = false, onGateClick }
           color: 'var(--accent)',
           fontSize: '10px',
           fontFamily: "'JetBrains Mono', monospace",
-          boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+          boxShadow: 'var(--shadow-tooltip)',
           zIndex: 5,
           maxWidth: '400px',
         }}>

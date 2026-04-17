@@ -32,7 +32,7 @@ function HorizDragHandle({ onMouseDown }) {
       style={{
         height: '6px',
         cursor: 'row-resize',
-        background: '#111',
+        background: 'var(--bg-elevated)',
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
@@ -40,18 +40,18 @@ function HorizDragHandle({ onMouseDown }) {
         touchAction: 'none',
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = '#0a1a0a'
+        e.currentTarget.style.background = 'var(--bg-hover)'
         e.currentTarget.querySelector('.grabber').style.opacity = '1'
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = '#111'
+        e.currentTarget.style.background = 'var(--bg-elevated)'
         e.currentTarget.querySelector('.grabber').style.opacity = '0.5'
       }}
     >
       <div className="grabber" style={{ display: 'flex', gap: '4px', opacity: 0.5, transition: 'opacity 0.15s' }}>
-        <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent)' }} />
-        <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent)' }} />
-        <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent)' }} />
+        <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent-primary)' }} />
+        <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent-primary)' }} />
+        <span style={{ width: '3px', height: '3px', borderRadius: '50%', background: 'var(--accent-primary)' }} />
       </div>
     </div>
   )
@@ -75,8 +75,8 @@ function TabBar({ tabs, active, onChange }) {
             padding: '4px 14px',
             background: 'transparent',
             border: 'none',
-            borderBottom: active === tab ? '2px solid var(--accent)' : '2px solid transparent',
-            color: active === tab ? 'var(--accent)' : '#444',
+            borderBottom: active === tab ? '2px solid var(--accent-primary)' : '2px solid transparent',
+            color: active === tab ? 'var(--accent-primary)' : 'var(--text-dim)',
             fontSize: '10px',
             fontWeight: 600,
             fontFamily: "'JetBrains Mono', monospace",
@@ -398,7 +398,7 @@ function App() {
   }, [])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#000' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-primary)' }}>
       {/* Top: Toolbar */}
       <Toolbar
         onSimulate={handleSimulate}
@@ -430,7 +430,7 @@ function App() {
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
         {/* LEFT SIDEBAR */}
-        <div style={{ width: `${leftWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, background: '#000' }}>
+        <div style={{ width: `${leftWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg-primary)' }}>
           <div style={{ height: `${leftSplitPos}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <ProjectExplorer
               moduleName={moduleName}
@@ -536,37 +536,37 @@ function App() {
             <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
               {bottomTab === 'CONSOLE' && (
                 <div style={{ height: '100%', overflow: 'auto', padding: '6px 12px', fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-dim)' }}>
-                  {simResult?.stderr && <pre style={{ color: 'var(--red)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
-                  {simResult?.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: '#555' }}>{simResult.stdout}</pre>}
+                  {simResult?.stderr && <pre style={{ color: 'var(--error)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
+                  {simResult?.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>{simResult.stdout}</pre>}
                   {!simResult?.stderr && !simResult?.stdout && (
-                    <div style={{ color: '#222', padding: '20px 0', textAlign: 'center' }}>Run a simulation to see console output</div>
+                    <div style={{ color: 'var(--text-dim)', padding: '20px 0', textAlign: 'center' }}>Run a simulation to see console output</div>
                   )}
                 </div>
               )}
               {bottomTab === 'VERIFICATION' && (
-                <div style={{ height: '100%', overflow: 'auto', padding: '12px 16px', fontSize: '12px', fontFamily: "'JetBrains Mono', monospace", color: '#aaa', lineHeight: '1.6' }}>
+                <div style={{ height: '100%', overflow: 'auto', padding: '12px 16px', fontSize: '12px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-secondary)', lineHeight: '1.6' }}>
                   {verifying && (
-                    <div style={{ color: 'var(--accent)', textAlign: 'center', padding: '20px' }}>
+                    <div style={{ color: 'var(--accent-primary)', textAlign: 'center', padding: '20px' }}>
                       <div style={{ display: 'flex', justifyContent: 'center', gap: '4px', marginBottom: '8px' }}>
-                        {[0,1,2].map(i => <span key={i} style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#00ff41', animation: `pulse-dot 1.2s ease-in-out ${i*0.2}s infinite` }} />)}
+                        {[0,1,2].map(i => <span key={i} style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'var(--accent-primary)', animation: `pulse-dot 1.2s ease-in-out ${i*0.2}s infinite` }} />)}
                       </div>
                       Running AI verification...
                     </div>
                   )}
                   {!verifying && !verifyReport && (
-                    <div style={{ color: '#333', textAlign: 'center', padding: '20px' }}>
+                    <div style={{ color: 'var(--text-dim)', textAlign: 'center', padding: '20px' }}>
                       Generate a design, then click VERIFY to run AI-driven verification.
                     </div>
                   )}
                   {!verifying && verifyReport && (
                     <div>
                       {verifyReport.summary?.total > 0 && (
-                        <div style={{ marginBottom: '12px', padding: '8px 12px', border: '1px solid #1a4a1a', borderRadius: '4px', background: '#001a00' }}>
-                          <span style={{ color: verifyReport.summary.failed > 0 ? '#ff4444' : '#00ff41', fontWeight: 600 }}>
+                        <div style={{ marginBottom: '12px', padding: '8px 12px', border: '1px solid var(--border-accent)', borderRadius: '4px', background: 'var(--accent-bg)' }}>
+                          <span style={{ color: verifyReport.summary.failed > 0 ? 'var(--error)' : 'var(--accent-primary)', fontWeight: 600 }}>
                             {verifyReport.summary.passed} of {verifyReport.summary.total} tests passed
                           </span>
                           {verifyReport.summary.failed > 0 && (
-                            <span style={{ color: '#ff4444', marginLeft: '12px' }}>
+                            <span style={{ color: 'var(--error)', marginLeft: '12px' }}>
                               ({verifyReport.summary.failed} failed)
                             </span>
                           )}
@@ -595,17 +595,17 @@ function App() {
                       onClick={() => setPrompt(ex)}
                       style={{
                         padding: '8px 12px',
-                        border: '1px solid var(--border)',
+                        border: '1px solid var(--border-primary)',
                         borderRadius: '3px',
-                        background: '#050505',
-                        color: '#666',
+                        background: 'var(--bg-surface)',
+                        color: 'var(--text-secondary)',
                         fontSize: '11px',
                         fontFamily: "'JetBrains Mono', monospace",
                         cursor: 'pointer',
                         transition: 'all 0.1s',
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = '#001a00' }}
-                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = '#666'; e.currentTarget.style.background = '#050505' }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; e.currentTarget.style.color = 'var(--accent-primary)'; e.currentTarget.style.background = 'var(--accent-bg)' }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border-primary)'; e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.background = 'var(--bg-surface)' }}
                     >
                       {ex}
                     </div>
