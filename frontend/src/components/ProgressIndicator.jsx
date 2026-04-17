@@ -52,8 +52,8 @@ export default function ProgressIndicator({ active, done }) {
       alignItems: 'center',
       gap: '16px',
       padding: '6px 16px',
-      background: '#050505',
-      borderBottom: '1px solid var(--border)',
+      background: 'var(--toolbar-bg)',
+      borderBottom: '1px solid var(--border-primary)',
       fontSize: '11px',
       fontFamily: "'JetBrains Mono', monospace",
       overflow: 'hidden',
@@ -70,7 +70,9 @@ export default function ProgressIndicator({ active, done }) {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              color: isCompleted ? '#00cc33' : isCurrent ? '#00ff41' : '#333',
+              color: isCompleted
+                ? 'var(--accent-secondary)'
+                : isCurrent ? 'var(--accent-primary)' : 'var(--text-dim)',
               transition: 'color 0.3s',
               whiteSpace: 'nowrap',
             }}
@@ -83,8 +85,8 @@ export default function ProgressIndicator({ active, done }) {
                 width: '6px',
                 height: '6px',
                 borderRadius: '50%',
-                background: '#00ff41',
-                boxShadow: '0 0 6px #00ff41',
+                background: 'var(--accent-primary)',
+                boxShadow: 'var(--accent-glow)',
                 animation: 'pulse-dot 1.2s ease-in-out infinite',
               }} />
             ) : (
@@ -93,7 +95,7 @@ export default function ProgressIndicator({ active, done }) {
                 width: '6px',
                 height: '6px',
                 borderRadius: '50%',
-                background: '#222',
+                background: 'var(--border-primary)',
               }} />
             )}
             <span>{label}</span>

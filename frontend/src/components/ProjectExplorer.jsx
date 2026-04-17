@@ -19,17 +19,17 @@ export default function ProjectExplorer({
   const [srcOpen, setSrcOpen] = useState(true)
   const [simOpen, setSimOpen] = useState(true)
 
-  // Dot colors: green=ok, red=errors, gray=not run
-  const designDot = hasErrors ? '#ff4444' : (hasDesign ? '#00ff41' : '#555')
-  const tbDot = hasErrors ? '#ff4444' : (hasTestbench ? '#00ff41' : '#555')
-  const simDot = hasSimResult ? '#00ff41' : '#555'
+  // Dot semantic keys — resolved to CSS variables at render time
+  const designDot = hasErrors ? 'error' : (hasDesign ? 'ok' : 'muted')
+  const tbDot = hasErrors ? 'error' : (hasTestbench ? 'ok' : 'muted')
+  const simDot = hasSimResult ? 'ok' : 'muted'
 
   return (
     <div style={{
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      background: '#000',
+      background: 'var(--bg-primary)',
       fontFamily: "'JetBrains Mono', monospace",
       overflow: 'hidden',
     }}>
@@ -39,10 +39,10 @@ export default function ProjectExplorer({
         style={{
           padding: '4px 10px',
           fontSize: '10px',
-          color: 'var(--accent)',
+          color: 'var(--accent-primary)',
           fontWeight: 600,
           background: 'var(--toolbar-bg)',
-          borderBottom: '1px solid var(--border)',
+          borderBottom: '1px solid var(--border-primary)',
           letterSpacing: '2px',
           display: 'flex',
           alignItems: 'center',
@@ -68,12 +68,12 @@ export default function ProjectExplorer({
           overflow: 'auto',
           padding: '6px 4px',
           fontSize: '11px',
-          color: '#888',
+          color: 'var(--text-secondary)',
         }}>
           {/* Project root */}
           <div style={{
             padding: '2px 6px',
-            color: 'var(--accent)',
+            color: 'var(--accent-primary)',
             fontWeight: 600,
             display: 'flex',
             alignItems: 'center',
@@ -89,7 +89,7 @@ export default function ProjectExplorer({
             style={{
               padding: '2px 6px 2px 20px',
               cursor: 'pointer',
-              color: '#aaa',
+              color: 'var(--text-secondary)',
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
@@ -122,7 +122,7 @@ export default function ProjectExplorer({
             style={{
               padding: '2px 6px 2px 20px',
               cursor: 'pointer',
-              color: '#aaa',
+              color: 'var(--text-secondary)',
               display: 'flex',
               alignItems: 'center',
               gap: '4px',
@@ -155,14 +155,20 @@ export default function ProjectExplorer({
 }
 
 function FileNode({ active, onClick, dotColor, label, disabled }) {
+  // Map semantic dot keys to CSS variables so they track the theme
+  const dotVar = dotColor === 'error'
+    ? 'var(--error)'
+    : dotColor === 'ok' ? 'var(--accent-primary)' : 'var(--dot-muted)'
   return (
     <div
       onClick={disabled ? undefined : onClick}
       style={{
         padding: '2px 6px 2px 34px',
         cursor: disabled ? 'default' : 'pointer',
-        color: active ? 'var(--accent)' : (disabled ? '#555' : '#888'),
-        background: active ? '#001a00' : 'transparent',
+        color: active
+          ? 'var(--accent-primary)'
+          : (disabled ? 'var(--text-dim)' : 'var(--text-secondary)'),
+        background: active ? 'var(--accent-bg)' : 'transparent',
         display: 'flex',
         alignItems: 'center',
         gap: '6px',
@@ -171,14 +177,14 @@ function FileNode({ active, onClick, dotColor, label, disabled }) {
       }}
       onMouseEnter={(e) => {
         if (!disabled && !active) {
-          e.currentTarget.style.background = '#0a0a0a'
-          e.currentTarget.style.color = 'var(--accent)'
+          e.currentTarget.style.background = 'var(--bg-surface)'
+          e.currentTarget.style.color = 'var(--accent-primary)'
         }
       }}
       onMouseLeave={(e) => {
         if (!disabled && !active) {
           e.currentTarget.style.background = 'transparent'
-          e.currentTarget.style.color = '#888'
+          e.currentTarget.style.color = 'var(--text-secondary)'
         }
       }}
     >
@@ -186,9 +192,9 @@ function FileNode({ active, onClick, dotColor, label, disabled }) {
         width: '6px',
         height: '6px',
         borderRadius: '50%',
-        background: dotColor,
+        background: dotVar,
         flexShrink: 0,
-        boxShadow: dotColor === '#00ff41' ? '0 0 4px #00ff4180' : 'none',
+        boxShadow: dotColor === 'ok' ? 'var(--accent-glow)' : 'none',
       }} />
       <span style={{
         overflow: 'hidden',

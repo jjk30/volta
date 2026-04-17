@@ -1,21 +1,28 @@
 import ChipIcon from './ChipIcon.jsx'
 
-const selectStyle = {
-  padding: '2px 14px 2px 4px',
-  background: '#000',
-  border: '1px solid #1a1a1a',
-  borderRadius: '2px',
-  color: 'var(--accent)',
-  fontSize: '0.75rem',
-  fontFamily: "'JetBrains Mono', monospace",
-  cursor: 'pointer',
-  width: '80px',
-  flexShrink: 0,
-  appearance: 'none',
-  WebkitAppearance: 'none',
-  backgroundImage: `url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L4 4L7 1' stroke='%2300ff41' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E")`,
-  backgroundRepeat: 'no-repeat',
-  backgroundPosition: 'right 3px center',
+// The select dropdown arrow is a small SVG baked into a data URL.
+// To keep it in sync with the theme, we embed both arrow colors and
+// flip between them based on the theme prop.
+function makeSelectStyle(theme) {
+  // Dark = bright green, Light = dark green
+  const stroke = theme === 'light' ? '%23006622' : '%2300ff41'
+  return {
+    padding: '2px 14px 2px 4px',
+    background: 'var(--bg-primary)',
+    border: '1px solid var(--border-primary)',
+    borderRadius: '2px',
+    color: 'var(--accent-primary)',
+    fontSize: '0.75rem',
+    fontFamily: "'JetBrains Mono', monospace",
+    cursor: 'pointer',
+    width: '80px',
+    flexShrink: 0,
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    backgroundImage: `url("data:image/svg+xml,%3Csvg width='8' height='5' viewBox='0 0 8 5' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L4 4L7 1' stroke='${stroke}' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 3px center',
+  }
 }
 
 export default function Toolbar({
@@ -47,6 +54,8 @@ export default function Toolbar({
     }
   }
 
+  const selectStyle = makeSelectStyle(theme)
+
   return (
     <div style={{
       display: 'flex',
@@ -54,14 +63,14 @@ export default function Toolbar({
       gap: '8px',
       padding: '5px 10px',
       background: 'var(--toolbar-bg)',
-      borderBottom: '1px solid var(--border)',
+      borderBottom: '1px solid var(--border-primary)',
       minHeight: '38px',
     }}>
       {/* VOLTA logo */}
       <div style={{
         fontWeight: 700,
         fontSize: '13px',
-        color: 'var(--accent)',
+        color: 'var(--accent-primary)',
         letterSpacing: '2px',
         fontFamily: "'JetBrains Mono', monospace",
         flexShrink: 0,
@@ -78,19 +87,19 @@ export default function Toolbar({
         flexShrink: 0,
         fontFamily: "'JetBrains Mono', monospace",
       }}>
-        <span style={{ color: '#555', fontSize: '11px' }}>Project:</span>
-        <span style={{ color: 'var(--accent)', fontSize: '11px', fontWeight: 600 }}>
+        <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>Project:</span>
+        <span style={{ color: 'var(--accent-primary)', fontSize: '11px', fontWeight: 600 }}>
           {projectName}
         </span>
         {projectStatus && (
           <span style={{
-            color: projectStatus === 'Modified' ? '#ccaa00' : '#00cc33',
+            color: projectStatus === 'Modified' ? 'var(--warning)' : 'var(--accent-secondary)',
             fontSize: '9px',
             letterSpacing: '0.5px',
-            border: `1px solid ${projectStatus === 'Modified' ? '#4a3a00' : '#1a4a1a'}`,
+            border: `1px solid ${projectStatus === 'Modified' ? 'var(--status-modified-border)' : 'var(--status-saved-border)'}`,
             borderRadius: '2px',
             padding: '1px 6px',
-            background: projectStatus === 'Modified' ? '#1a1400' : '#001a00',
+            background: projectStatus === 'Modified' ? 'var(--status-modified-bg)' : 'var(--status-saved-bg)',
           }}>
             {projectStatus === 'Modified' ? 'Modified' : 'Saved: Just now'}
           </span>
@@ -107,19 +116,19 @@ export default function Toolbar({
         style={{
           width: '140px',
           flexShrink: 0,
-          background: '#000',
-          border: '1px solid #1a1a1a',
+          background: 'var(--bg-primary)',
+          border: '1px solid var(--border-primary)',
           borderRadius: '2px',
           padding: '3px 8px',
           color: 'var(--text-primary)',
           fontSize: '10px',
           fontFamily: "'JetBrains Mono', monospace",
           outline: 'none',
-          caretColor: 'var(--accent)',
+          caretColor: 'var(--accent-primary)',
         }}
       />
 
-      <div style={{ width: '1px', height: '18px', background: 'var(--border)', flexShrink: 0 }} />
+      <div style={{ width: '1px', height: '18px', background: 'var(--border-primary)', flexShrink: 0 }} />
 
       {/* Compact inline dropdowns */}
       <select defaultValue="Verilog" style={selectStyle}>
@@ -143,7 +152,7 @@ export default function Toolbar({
         <option disabled>OVM 2.1.2</option>
       </select>
 
-      <div style={{ width: '1px', height: '18px', background: 'var(--border)', flexShrink: 0 }} />
+      <div style={{ width: '1px', height: '18px', background: 'var(--border-primary)', flexShrink: 0 }} />
 
       {/* Prompt input */}
       <div style={{
@@ -152,14 +161,14 @@ export default function Toolbar({
         alignItems: 'center',
         gap: '5px',
         background: 'var(--bg-primary)',
-        border: '1px solid var(--border)',
+        border: '1px solid var(--border-primary)',
         borderRadius: '3px',
         padding: '2px 8px',
         minWidth: 0,
       }}>
         <ChipIcon size={16} />
         <span style={{
-          color: 'var(--accent)',
+          color: 'var(--accent-primary)',
           fontSize: '12px',
           fontFamily: "'JetBrains Mono', monospace",
           animation: 'blink-cursor 1s step-end infinite',
@@ -183,149 +192,43 @@ export default function Toolbar({
             fontSize: '11px',
             fontFamily: "'JetBrains Mono', monospace",
             minWidth: 0,
-            caretColor: 'var(--accent)',
+            caretColor: 'var(--accent-primary)',
           }}
         />
       </div>
 
       {/* GENERATE button (moved to right end) */}
       {generating ? (
-        <button
-          onClick={onCancelGenerate}
-          style={{
-            padding: '3px 10px',
-            border: '1px solid #ff4444',
-            borderRadius: '3px',
-            background: 'transparent',
-            color: '#ff4444',
-            fontSize: '11px',
-            fontWeight: 600,
-            fontFamily: "'JetBrains Mono', monospace",
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
-          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
-        >
-          CANCEL
-        </button>
+        <CancelButton onClick={onCancelGenerate} />
       ) : (
-        <button
+        <ActionButton
           onClick={handleGenerate}
           disabled={!prompt.trim()}
-          style={{
-            padding: '3px 10px',
-            border: `1px solid ${prompt.trim() ? 'var(--accent)' : 'var(--border)'}`,
-            borderRadius: '3px',
-            background: 'transparent',
-            color: prompt.trim() ? 'var(--accent)' : '#333',
-            fontSize: '11px',
-            fontWeight: 600,
-            fontFamily: "'JetBrains Mono', monospace",
-            cursor: !prompt.trim() ? 'default' : 'pointer',
-            opacity: !prompt.trim() ? 0.6 : 1,
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { if (prompt.trim()) { e.target.style.background = 'var(--accent)'; e.target.style.color = '#000' } }}
-          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = prompt.trim() ? 'var(--accent)' : '#333' }}
-        >
-          GENERATE
-        </button>
+          label="GENERATE"
+        />
       )}
 
       {/* Simulate button */}
       {simulating ? (
-        <button
-          onClick={onCancelSimulate}
-          style={{
-            padding: '3px 10px',
-            border: '1px solid #ff4444',
-            borderRadius: '3px',
-            background: 'transparent',
-            color: '#ff4444',
-            fontSize: '11px',
-            fontWeight: 600,
-            fontFamily: "'JetBrains Mono', monospace",
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
-          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
-        >
-          CANCEL
-        </button>
+        <CancelButton onClick={onCancelSimulate} />
       ) : (
-        <button
+        <ActionButton
           onClick={onSimulate}
           disabled={!canSimulate}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '3px 10px',
-            border: `1px solid ${canSimulate ? 'var(--accent)' : 'var(--border)'}`,
-            borderRadius: '3px',
-            background: 'transparent',
-            color: canSimulate ? 'var(--accent)' : '#333',
-            fontSize: '11px',
-            fontWeight: 600,
-            fontFamily: "'JetBrains Mono', monospace",
-            cursor: canSimulate ? 'pointer' : 'default',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { if (canSimulate) { e.target.style.background = 'var(--accent)'; e.target.style.color = '#000' } }}
-          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = canSimulate ? 'var(--accent)' : '#333' }}
-        >
-          <span style={{ fontSize: '10px' }}>&#9654;</span>
-          SIM
-        </button>
+          label="SIM"
+          prefix={<span style={{ fontSize: '10px' }}>&#9654;</span>}
+        />
       )}
 
       {/* Verify button */}
       {verifying ? (
-        <button
-          onClick={onCancelVerify}
-          style={{
-            padding: '3px 10px',
-            border: '1px solid #ff4444',
-            borderRadius: '3px',
-            background: 'transparent',
-            color: '#ff4444',
-            fontSize: '11px',
-            fontWeight: 600,
-            fontFamily: "'JetBrains Mono', monospace",
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
-          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
-        >
-          CANCEL
-        </button>
+        <CancelButton onClick={onCancelVerify} />
       ) : (
-        <button
+        <ActionButton
           onClick={onVerify}
           disabled={!canVerify}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            padding: '3px 10px',
-            border: `1px solid ${canVerify ? 'var(--accent)' : 'var(--border)'}`,
-            borderRadius: '3px',
-            background: 'transparent',
-            color: canVerify ? 'var(--accent)' : '#333',
-            fontSize: '11px',
-            fontWeight: 600,
-            fontFamily: "'JetBrains Mono', monospace",
-            cursor: canVerify ? 'pointer' : 'default',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { if (canVerify) { e.target.style.background = 'var(--accent)'; e.target.style.color = '#000' } }}
-          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = canVerify ? 'var(--accent)' : '#333' }}
-        >
-          VERIFY
-        </button>
+          label="VERIFY"
+        />
       )}
 
       {/* Theme toggle (dark/light pill) */}
@@ -333,17 +236,17 @@ export default function Toolbar({
 
       {/* Status */}
       {cancelled && (
-        <span style={{ fontSize: '10px', color: '#ff4444', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
+        <span style={{ fontSize: '10px', color: 'var(--error)', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
           Cancelled
         </span>
       )}
       {error && !cancelled && (
-        <span style={{ fontSize: '10px', color: 'var(--red)', fontFamily: "'JetBrains Mono', monospace", maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>
+        <span style={{ fontSize: '10px', color: 'var(--error)', fontFamily: "'JetBrains Mono', monospace", maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0 }}>
           {error}
         </span>
       )}
       {!error && !cancelled && hasResult && (
-        <span style={{ fontSize: '10px', color: 'var(--accent)', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
+        <span style={{ fontSize: '10px', color: 'var(--accent-primary)', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
           &#10003;
         </span>
       )}
@@ -351,9 +254,81 @@ export default function Toolbar({
   )
 }
 
+/** Red CANCEL button used by all three in-flight states. */
+function CancelButton({ onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '3px 10px',
+        border: '1px solid var(--error)',
+        borderRadius: '3px',
+        background: 'transparent',
+        color: 'var(--error)',
+        fontSize: '11px',
+        fontWeight: 600,
+        fontFamily: "'JetBrains Mono', monospace",
+        cursor: 'pointer',
+        flexShrink: 0,
+      }}
+      onMouseEnter={(e) => {
+        e.target.style.background = 'var(--error)'
+        e.target.style.color = 'var(--bg-primary)'
+      }}
+      onMouseLeave={(e) => {
+        e.target.style.background = 'transparent'
+        e.target.style.color = 'var(--error)'
+      }}
+    >
+      CANCEL
+    </button>
+  )
+}
+
+/** Green primary-action button (GENERATE/SIM/VERIFY) that dims when disabled. */
+function ActionButton({ onClick, disabled, label, prefix }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+        padding: '3px 10px',
+        border: `1px solid ${disabled ? 'var(--border-primary)' : 'var(--accent-primary)'}`,
+        borderRadius: '3px',
+        background: 'transparent',
+        color: disabled ? 'var(--text-dim)' : 'var(--accent-primary)',
+        fontSize: '11px',
+        fontWeight: 600,
+        fontFamily: "'JetBrains Mono', monospace",
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.6 : 1,
+        flexShrink: 0,
+      }}
+      onMouseEnter={(e) => {
+        if (!disabled) {
+          e.currentTarget.style.background = 'var(--accent-primary)'
+          e.currentTarget.style.color = 'var(--bg-primary)'
+        }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent'
+        e.currentTarget.style.color = disabled ? 'var(--text-dim)' : 'var(--accent-primary)'
+      }}
+    >
+      {prefix}
+      {label}
+    </button>
+  )
+}
+
 /**
- * Small pill-shaped dark/light theme toggle. 40x20px track with a sliding
- * 16x16 thumb. D (dark) on the left, L (light) on the right.
+ * Pill-shaped dark/light theme toggle. 40×20 track with a sliding 18px
+ * circular thumb that holds the active icon (crescent moon in dark mode,
+ * sun in light mode). Icons use `currentColor` so they inherit the theme
+ * palette automatically.
  */
 function ThemeToggle({ theme, onToggle }) {
   const isLight = theme === 'light'
@@ -366,48 +341,19 @@ function ThemeToggle({ theme, onToggle }) {
         position: 'relative',
         width: '40px',
         height: '20px',
-        border: '1px solid var(--accent)',
+        border: '1px solid var(--accent-primary)',
         borderRadius: '10px',
-        background: 'transparent',
+        background: 'var(--accent-bg)',
         padding: 0,
         cursor: 'pointer',
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         fontFamily: "'JetBrains Mono', monospace",
-        transition: 'background 0.15s',
+        transition: 'background 0.15s, border-color 0.15s',
       }}
     >
-      {/* Track labels */}
-      <span style={{
-        position: 'absolute',
-        left: '5px',
-        top: '50%',
-        transform: 'translateY(-50%)',
-        fontSize: '9px',
-        fontWeight: 700,
-        color: isLight ? 'var(--text-dim)' : 'var(--accent)',
-        pointerEvents: 'none',
-        transition: 'color 0.2s',
-        lineHeight: 1,
-      }}>
-        D
-      </span>
-      <span style={{
-        position: 'absolute',
-        right: '5px',
-        top: '50%',
-        transform: 'translateY(-50%)',
-        fontSize: '9px',
-        fontWeight: 700,
-        color: isLight ? 'var(--accent)' : 'var(--text-dim)',
-        pointerEvents: 'none',
-        transition: 'color 0.2s',
-        lineHeight: 1,
-      }}>
-        L
-      </span>
-      {/* Sliding thumb */}
+      {/* Sliding thumb — holds the active icon */}
       <span style={{
         position: 'absolute',
         top: '1px',
@@ -415,10 +361,60 @@ function ThemeToggle({ theme, onToggle }) {
         width: '16px',
         height: '16px',
         borderRadius: '50%',
-        background: 'var(--accent)',
-        transition: 'left 0.2s ease',
+        background: 'var(--accent-primary)',
+        color: 'var(--bg-primary)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        transition: 'left 0.2s ease, background 0.15s',
         boxShadow: 'var(--accent-glow)',
-      }} />
+      }}>
+        {isLight ? <SunIcon /> : <MoonIcon />}
+      </span>
     </button>
+  )
+}
+
+function MoonIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ transition: 'opacity 0.2s' }}
+    >
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  )
+}
+
+function SunIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ transition: 'opacity 0.2s' }}
+    >
+      <circle cx="12" cy="12" r="4" />
+      <line x1="12" y1="2" x2="12" y2="4" />
+      <line x1="12" y1="20" x2="12" y2="22" />
+      <line x1="4.93" y1="4.93" x2="6.34" y2="6.34" />
+      <line x1="17.66" y1="17.66" x2="19.07" y2="19.07" />
+      <line x1="2" y1="12" x2="4" y2="12" />
+      <line x1="20" y1="12" x2="22" y2="12" />
+      <line x1="4.93" y1="19.07" x2="6.34" y2="17.66" />
+      <line x1="17.66" y1="6.34" x2="19.07" y2="4.93" />
+    </svg>
   )
 }

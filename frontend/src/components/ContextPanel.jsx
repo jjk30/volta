@@ -17,7 +17,7 @@ export default function ContextPanel({
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      background: '#000',
+      background: 'var(--bg-primary)',
       fontFamily: "'JetBrains Mono', monospace",
       overflow: 'hidden',
     }}>
@@ -27,10 +27,10 @@ export default function ContextPanel({
         style={{
           padding: '4px 10px',
           fontSize: '10px',
-          color: 'var(--accent)',
+          color: 'var(--accent-primary)',
           fontWeight: 600,
           background: 'var(--toolbar-bg)',
-          borderBottom: '1px solid var(--border)',
+          borderBottom: '1px solid var(--border-primary)',
           letterSpacing: '2px',
           display: 'flex',
           alignItems: 'center',
@@ -55,7 +55,7 @@ export default function ContextPanel({
           overflow: 'auto',
           padding: '10px 12px',
           fontSize: '11px',
-          color: '#888',
+          color: 'var(--text-secondary)',
         }}>
           {/* Mini schematic icon */}
           <div style={{
@@ -86,12 +86,12 @@ function MetaRow({ label, value, last }) {
       justifyContent: 'space-between',
       alignItems: 'center',
       padding: '5px 4px',
-      borderBottom: last ? 'none' : '1px solid #111',
+      borderBottom: last ? 'none' : '1px solid var(--divider)',
       fontSize: '11px',
     }}>
-      <span style={{ color: '#666' }}>{label}:</span>
+      <span style={{ color: 'var(--text-dim)' }}>{label}:</span>
       <span style={{
-        color: 'var(--accent)',
+        color: 'var(--accent-primary)',
         fontWeight: 500,
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -106,39 +106,40 @@ function MetaRow({ label, value, last }) {
 }
 
 function MiniChipIcon() {
+  // stroke/fill use currentColor so the icon reskins with the surrounding color
   return (
     <svg
       width="56"
       height="56"
       viewBox="0 0 40 40"
       fill="none"
-      style={{ flexShrink: 0 }}
+      style={{ flexShrink: 0, color: 'var(--accent-primary)' }}
     >
       {/* Chip body */}
       <rect
         x="10" y="10" width="20" height="20" rx="1.5"
-        stroke="#00ff41" strokeWidth="1.2" fill="#00ff4108" opacity="0.8"
+        stroke="currentColor" strokeWidth="1.2" fill="currentColor" fillOpacity="0.05" opacity="0.85"
       />
       {/* Center pad */}
       <rect
         x="16" y="16" width="8" height="8" rx="0.5"
-        stroke="#00ff41" strokeWidth="0.8" fill="none" opacity="0.4"
+        stroke="currentColor" strokeWidth="0.8" fill="none" opacity="0.4"
       />
       {/* Top pins */}
       {[14, 20, 26].map((x) => (
-        <line key={`t-${x}`} x1={x} y1="4" x2={x} y2="10" stroke="#00cc33" strokeWidth="1.2" opacity="0.7" />
+        <line key={`t-${x}`} x1={x} y1="4" x2={x} y2="10" stroke="var(--accent-secondary)" strokeWidth="1.2" opacity="0.7" />
       ))}
       {/* Bottom pins */}
       {[14, 20, 26].map((x) => (
-        <line key={`b-${x}`} x1={x} y1="30" x2={x} y2="36" stroke="#00cc33" strokeWidth="1.2" opacity="0.7" />
+        <line key={`b-${x}`} x1={x} y1="30" x2={x} y2="36" stroke="var(--accent-secondary)" strokeWidth="1.2" opacity="0.7" />
       ))}
       {/* Left pins */}
       {[14, 20, 26].map((y) => (
-        <line key={`l-${y}`} x1="4" y1={y} x2="10" y2={y} stroke="#00cc33" strokeWidth="1.2" opacity="0.7" />
+        <line key={`l-${y}`} x1="4" y1={y} x2="10" y2={y} stroke="var(--accent-secondary)" strokeWidth="1.2" opacity="0.7" />
       ))}
       {/* Right pins */}
       {[14, 20, 26].map((y) => (
-        <line key={`r-${y}`} x1="30" y1={y} x2="36" y2={y} stroke="#00cc33" strokeWidth="1.2" opacity="0.7" />
+        <line key={`r-${y}`} x1="30" y1={y} x2="36" y2={y} stroke="var(--accent-secondary)" strokeWidth="1.2" opacity="0.7" />
       ))}
     </svg>
   )

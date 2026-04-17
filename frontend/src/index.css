@@ -11,114 +11,169 @@
 /* ============================================================== */
 :root,
 [data-theme="dark"] {
+  /* Canonical palette */
   --bg-primary: #000000;
-  --bg-secondary: #0a0a0a;
-  --bg-surface: #000000;
-  --bg-elevated: #050505;
-  --bg-hover: #0a1a0a;
-  --bg-code: #0a1a0a;
-
+  --bg-surface: #0a0a0a;
+  --bg-elevated: #111111;
+  --border-primary: #1a1a1a;
+  --border-accent: #1a4a1a;
   --text-primary: #e0e0e0;
-  --text-secondary: #888888;
-  --text-dim: #444444;
-  --text-muted: #333333;
-
-  --accent: #00ff41;
+  --text-secondary: #aaaaaa;
+  --text-dim: #666666;
+  --accent-primary: #00ff41;
   --accent-secondary: #00cc33;
-  --accent-dim: #00ff4120;
-  --accent-bg: #001a00;
-  --accent-glow: 0 0 10px #00ff4140, 0 0 20px #00ff4120;
+  --accent-bg: rgba(0, 255, 65, 0.1);
+  --error: #ff4444;
+  --warning: #ffaa00;
+  --code-bg: #0a0a0a;
+  --code-border: #1a4a1a;
+  --scrollbar-track: #0a0a0a;
+  --scrollbar-thumb: #1a4a1a;
 
-  --green: #00ff41;
-  --red: #ff4444;
-  --yellow: #ccaa00;
+  /* Accent as RGB triplet so rgba() can be built from it */
+  --accent-rgb: 0, 255, 65;
+  --error-rgb: 255, 68, 68;
+
+  /* Derived / semantic aliases */
+  --bg-secondary: #0a0a0a;
+  --bg-hover: rgba(0, 255, 65, 0.05);
+  --bg-code: var(--code-bg);
+  --text-muted: #444444;
+
+  --accent: var(--accent-primary);
+  --accent-dim: rgba(0, 255, 65, 0.12);
+  --accent-glow: 0 0 10px rgba(0, 255, 65, 0.25), 0 0 20px rgba(0, 255, 65, 0.12);
+
+  --green: var(--accent-primary);
+  --red: var(--error);
+  --yellow: var(--warning);
   --amber: #d4a017;
 
-  --border: #1a1a1a;
-  --border-accent: #1a4a1a;
+  --border: var(--border-primary);
   --border-light: #2a2a2a;
 
   --toolbar-bg: #050505;
-  --panel-bg: #0a0a0a;
+  --panel-bg: var(--bg-surface);
+  --surface-hover: #141414;
 
-  --chat-user-bg: #001a00;
-  --chat-assistant-bg: #0a0a0a;
-  --chat-user-text: #00ff41;
-  --chat-assistant-text: #aaaaaa;
+  --chat-user-bg: rgba(0, 255, 65, 0.08);
+  --chat-assistant-bg: var(--bg-surface);
+  --chat-user-text: var(--accent-primary);
+  --chat-assistant-text: var(--text-secondary);
 
-  --tooltip-bg: #0a0a0a;
-  --error-bg: #1a0505;
+  --tooltip-bg: var(--bg-surface);
+  --error-bg: rgba(255, 68, 68, 0.1);
+  --warning-bg: rgba(255, 170, 0, 0.1);
+  --warning-border: #4a3a00;
+
+  --status-saved-bg: rgba(0, 255, 65, 0.1);
+  --status-saved-border: var(--border-accent);
+  --status-modified-bg: rgba(255, 170, 0, 0.08);
+  --status-modified-border: var(--warning-border);
+
+  --dot-muted: #555555;
+  --divider: #1a1a1a;
+
+  --shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-popover: 0 4px 20px rgba(0, 255, 65, 0.1), 0 4px 16px rgba(0, 0, 0, 0.6);
 
   /* Schematic-specific */
-  --schematic-accent: #00ff41;
-  --schematic-wire: #00cc33;
-  --schematic-highlight: #00ff41;
-  --schematic-error: #ff4444;
+  --schematic-accent: var(--accent-primary);
+  --schematic-wire: var(--accent-secondary);
+  --schematic-highlight: var(--accent-primary);
+  --schematic-error: var(--error);
 
   /* Waveform-specific */
   --waveform-bg: #000000;
-  --waveform-grid-minor: #0a1a0a;
-  --waveform-grid-major: #0d2a0d;
-  --waveform-axis: #1a3a1a;
-  --waveform-label: #00ff4160;
-  --waveform-trace-separator: #0d1a0d;
+  --waveform-grid-minor: rgba(0, 255, 65, 0.06);
+  --waveform-grid-major: rgba(0, 255, 65, 0.12);
+  --waveform-axis: rgba(0, 255, 65, 0.25);
+  --waveform-label: rgba(0, 255, 65, 0.6);
+  --waveform-trace-separator: rgba(0, 255, 65, 0.08);
 }
 
 /* ============================================================== */
 /*                    LIGHT THEME                                  */
 /* ============================================================== */
 [data-theme="light"] {
+  /* Canonical palette */
   --bg-primary: #f5f5f0;
-  --bg-secondary: #ffffff;
   --bg-surface: #ffffff;
-  --bg-elevated: #e8e8e0;
-  --bg-hover: #dfefd8;
-  --bg-code: #f0f8ec;
-
+  --bg-elevated: #eaeaea;
+  --border-primary: #d0d0d0;
+  --border-accent: #88aa88;
   --text-primary: #1a1a1a;
   --text-secondary: #555555;
-  --text-dim: #888888;
+  --text-dim: #999999;
+  --accent-primary: #006622;
+  --accent-secondary: #008833;
+  --accent-bg: rgba(0, 102, 34, 0.08);
+  --error: #cc0000;
+  --warning: #cc8800;
+  --code-bg: #f8f8f5;
+  --code-border: #c0d0c0;
+  --scrollbar-track: #e0e0e0;
+  --scrollbar-thumb: #aabbaa;
+
+  --accent-rgb: 0, 102, 34;
+  --error-rgb: 204, 0, 0;
+
+  /* Derived / semantic aliases */
+  --bg-secondary: #ffffff;
+  --bg-hover: rgba(0, 102, 34, 0.07);
+  --bg-code: var(--code-bg);
   --text-muted: #b0b0b0;
 
-  --accent: #006622;
-  --accent-secondary: #008833;
-  --accent-dim: #00662225;
-  --accent-bg: #d8efd8;
-  --accent-glow: 0 0 8px #00662230;
+  --accent: var(--accent-primary);
+  --accent-dim: rgba(0, 102, 34, 0.14);
+  --accent-glow: 0 0 8px rgba(0, 102, 34, 0.2);
 
-  --green: #006622;
-  --red: #cc2222;
-  --yellow: #b8860b;
+  --green: var(--accent-primary);
+  --red: var(--error);
+  --yellow: var(--warning);
   --amber: #996600;
 
-  --border: #d0d0d0;
-  --border-accent: #a0c0a0;
-  --border-light: #b0b0b0;
+  --border: var(--border-primary);
+  --border-light: #b5b5b5;
 
-  --toolbar-bg: #ebebe3;
-  --panel-bg: #f0f0ec;
+  --toolbar-bg: #e8e8e0;
+  --panel-bg: var(--bg-surface);
+  --surface-hover: #ededed;
 
-  --chat-user-bg: #d8efd8;
-  --chat-assistant-bg: #ffffff;
-  --chat-user-text: #006622;
-  --chat-assistant-text: #333333;
+  --chat-user-bg: rgba(0, 102, 34, 0.1);
+  --chat-assistant-bg: var(--bg-surface);
+  --chat-user-text: var(--accent-primary);
+  --chat-assistant-text: var(--text-primary);
 
-  --tooltip-bg: #ffffff;
-  --error-bg: #fdecec;
+  --tooltip-bg: var(--bg-surface);
+  --error-bg: rgba(204, 0, 0, 0.08);
+  --warning-bg: rgba(204, 136, 0, 0.1);
+  --warning-border: #d8b070;
+
+  --status-saved-bg: rgba(0, 102, 34, 0.12);
+  --status-saved-border: var(--border-accent);
+  --status-modified-bg: rgba(204, 136, 0, 0.12);
+  --status-modified-border: var(--warning-border);
+
+  --dot-muted: #b0b0b0;
+  --divider: #d0d0d0;
+
+  --shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --shadow-popover: 0 4px 20px rgba(0, 102, 34, 0.08), 0 4px 16px rgba(0, 0, 0, 0.12);
 
   /* Schematic-specific */
-  --schematic-accent: #006622;
-  --schematic-wire: #008833;
-  --schematic-highlight: #006622;
-  --schematic-error: #cc2222;
+  --schematic-accent: var(--accent-primary);
+  --schematic-wire: var(--accent-secondary);
+  --schematic-highlight: var(--accent-primary);
+  --schematic-error: var(--error);
 
   /* Waveform-specific */
   --waveform-bg: #fafaf5;
-  --waveform-grid-minor: #e5ead5;
-  --waveform-grid-major: #c8d8b8;
-  --waveform-axis: #90a890;
-  --waveform-label: #00662280;
-  --waveform-trace-separator: #d8e0d0;
+  --waveform-grid-minor: rgba(0, 102, 34, 0.08);
+  --waveform-grid-major: rgba(0, 102, 34, 0.16);
+  --waveform-axis: rgba(0, 102, 34, 0.3);
+  --waveform-label: rgba(0, 102, 34, 0.65);
+  --waveform-trace-separator: rgba(0, 102, 34, 0.1);
 }
 
 html, body, #root {
@@ -132,7 +187,8 @@ html, body, #root {
 }
 
 /* ==============================================================
-   CodeMirror theme overrides
+   CodeMirror theme overrides — complement the theme extension
+   switched from JS via a Compartment when data-theme changes.
    ============================================================== */
 .cm-editor {
   height: 100%;
@@ -146,6 +202,7 @@ html, body, #root {
 
 .cm-editor .cm-content {
   font-family: 'JetBrains Mono', monospace;
+  color: var(--text-primary);
 }
 
 .cm-editor.cm-focused {
@@ -153,15 +210,15 @@ html, body, #root {
 }
 
 .cm-editor .cm-gutters {
-  background: var(--bg-elevated) !important;
-  border-right: 1px solid var(--border) !important;
-  color: var(--accent) !important;
+  background: var(--toolbar-bg) !important;
+  border-right: 1px solid var(--border-primary) !important;
+  color: var(--accent-primary) !important;
   opacity: 0.6;
 }
 
 .cm-editor .cm-activeLineGutter {
-  background: var(--bg-secondary) !important;
-  color: var(--accent) !important;
+  background: var(--bg-surface) !important;
+  color: var(--accent-primary) !important;
   opacity: 1;
 }
 
@@ -169,47 +226,7 @@ html, body, #root {
   background: var(--accent-dim) !important;
 }
 
-/* Light-mode CodeMirror syntax overrides (oneDark theme is inherently dark) */
-[data-theme="light"] .cm-editor {
-  color: #1a1a1a;
-}
-[data-theme="light"] .cm-editor .cm-content {
-  color: #1a1a1a !important;
-}
-[data-theme="light"] .cm-editor .tok-keyword,
-[data-theme="light"] .cm-editor .tok-modifier,
-[data-theme="light"] .cm-editor .tok-definitionKeyword,
-[data-theme="light"] .cm-editor .tok-controlKeyword {
-  color: #006622 !important;
-}
-[data-theme="light"] .cm-editor .tok-string,
-[data-theme="light"] .cm-editor .tok-string2 {
-  color: #cc2222 !important;
-}
-[data-theme="light"] .cm-editor .tok-comment,
-[data-theme="light"] .cm-editor .tok-lineComment,
-[data-theme="light"] .cm-editor .tok-blockComment {
-  color: #888 !important;
-  font-style: italic;
-}
-[data-theme="light"] .cm-editor .tok-number,
-[data-theme="light"] .cm-editor .tok-bool {
-  color: #b8860b !important;
-}
-[data-theme="light"] .cm-editor .tok-variableName,
-[data-theme="light"] .cm-editor .tok-propertyName {
-  color: #1a1a1a !important;
-}
-[data-theme="light"] .cm-editor .tok-typeName {
-  color: #006622 !important;
-  font-weight: 500;
-}
-[data-theme="light"] .cm-editor .tok-operator,
-[data-theme="light"] .cm-editor .tok-punctuation {
-  color: #555 !important;
-}
-
-/* Lint: wavy underlines — override CM default colors with our red/amber */
+/* Lint: wavy underlines — uses error/warning colors */
 .cm-lintRange.cm-lintRange-error {
   background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'><path d='m0 2.5 l2 -1.5 l1 0 l2 1.5 l1 0' stroke='%23ff4444' fill='none' stroke-width='.7'/></svg>") !important;
   background-repeat: repeat-x !important;
@@ -237,10 +254,10 @@ html, body, #root {
   padding: 3px 8px !important;
 }
 .cm-diagnostic-error {
-  border-left: 3px solid #ff4444 !important;
+  border-left: 3px solid var(--error) !important;
 }
 .cm-diagnostic-warning {
-  border-left: 3px solid #ffaa00 !important;
+  border-left: 3px solid var(--warning) !important;
 }
 
 /* Hide inline lint panel */
@@ -264,12 +281,6 @@ html, body, #root {
   50% { opacity: 0; }
 }
 
-@keyframes chip-pin-flow {
-  0% { stroke: #00ff4120; }
-  50% { stroke: #00ff41; }
-  100% { stroke: #00ff4120; }
-}
-
 /* Terminal input placeholder */
 input::placeholder {
   color: var(--text-dim);
@@ -284,11 +295,11 @@ input::placeholder {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--bg-primary);
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--border-light);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 

@@ -1,11 +1,35 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { CATEGORIES, SYMBOLS } from '../symbolsData.js'
 
+// Re-read palette colors whenever the document's data-theme attribute
+// changes so the inlined symbol SVGs reskin correctly in light mode.
+function readPalette() {
+  const cs = getComputedStyle(document.documentElement)
+  const get = (name, fallback) => (cs.getPropertyValue(name) || fallback).trim() || fallback
+  return {
+    accent: get('--accent-primary', '#00ff41'),
+    accentSecondary: get('--accent-secondary', '#00cc33'),
+  }
+}
+
+function useThemePalette() {
+  const [palette, setPalette] = useState(() => {
+    try { return readPalette() } catch { return { accent: '#00ff41', accentSecondary: '#00cc33' } }
+  })
+  useEffect(() => {
+    const observer = new MutationObserver(() => setPalette(readPalette()))
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => observer.disconnect()
+  }, [])
+  return palette
+}
+
 export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onClear, showHeader = true }) {
   const [activeCategory, setActiveCategory] = useState('Logic Gates')
   const [hovered, setHovered] = useState(null)
   const [ttState, setTtState] = useState(null) // { symId, table, x, y } or null
   const popoverRef = useRef(null)
+  const palette = useThemePalette()
 
   const symbols = SYMBOLS[activeCategory] || []
 
@@ -58,7 +82,7 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      background: '#000',
+      background: 'var(--bg-primary)',
       fontFamily: "'JetBrains Mono', monospace",
     }}>
       {/* Header */}
@@ -66,10 +90,10 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
         <div style={{
           padding: '3px 12px',
           fontSize: '11px',
-          color: 'var(--accent)',
+          color: 'var(--accent-primary)',
           fontWeight: 500,
           background: 'var(--toolbar-bg)',
-          borderBottom: '1px solid var(--border)',
+          borderBottom: '1px solid var(--border-primary)',
           letterSpacing: '1px',
           flexShrink: 0,
         }}>
@@ -83,8 +107,8 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
         gap: '0',
         overflowX: 'auto',
         flexShrink: 0,
-        background: '#050505',
-        borderBottom: '1px solid var(--border)',
+        background: 'var(--toolbar-bg)',
+        borderBottom: '1px solid var(--border-primary)',
       }}>
         {CATEGORIES.map((cat) => (
           <button
@@ -94,8 +118,8 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
               padding: '4px 8px',
               background: 'transparent',
               border: 'none',
-              borderBottom: activeCategory === cat ? '2px solid var(--accent)' : '2px solid transparent',
-              color: activeCategory === cat ? 'var(--accent)' : '#444',
+              borderBottom: activeCategory === cat ? '2px solid var(--accent-primary)' : '2px solid transparent',
+              color: activeCategory === cat ? 'var(--accent-primary)' : 'var(--text-dim)',
               fontSize: '9px',
               fontWeight: 600,
               fontFamily: "'JetBrains Mono', monospace",
@@ -113,7 +137,7 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
       <div style={{
         padding: '3px 8px',
         fontSize: '9px',
-        color: '#446644',
+        color: 'var(--accent-secondary)',
         fontStyle: 'italic',
         textAlign: 'center',
         flexShrink: 0,
@@ -121,18 +145,20 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
         alignItems: 'center',
         justifyContent: 'center',
         gap: '6px',
+        opacity: 0.7,
       }}>
         <span>Click symbols to build circuit &bull; TT for truth table</span>
         {selectedIds.length > 0 && (
           <span
             onClick={onClear}
             style={{
-              color: '#ff4444',
+              color: 'var(--error)',
               cursor: 'pointer',
               fontStyle: 'normal',
               fontWeight: 600,
               fontSize: '8px',
               letterSpacing: '0.5px',
+              opacity: 1,
             }}
           >
             CLEAR ({selectedIds.length})
@@ -163,11 +189,15 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
                 height: '160px',
                 padding: '8px',
                 borderRadius: '4px',
-                border: isSelected ? '2px solid #00ff41' : `1px solid ${isHovered || isTTOpen ? 'var(--accent)' : '#1a1a1a'}`,
-                background: isSelected ? '#001a00' : (isHovered ? '#001a00' : '#0a0a0a'),
+                border: isSelected
+                  ? '2px solid var(--accent-primary)'
+                  : `1px solid ${isHovered || isTTOpen ? 'var(--accent-primary)' : 'var(--border-primary)'}`,
+                background: isSelected
+                  ? 'var(--accent-bg)'
+                  : (isHovered ? 'var(--accent-bg)' : 'var(--bg-surface)'),
                 cursor: 'pointer',
                 transition: 'all 0.15s',
-                boxShadow: isHovered ? '0 0 8px #00ff4120' : 'none',
+                boxShadow: isHovered ? 'var(--accent-glow)' : 'none',
                 display: 'flex',
                 flexDirection: 'column',
                 position: 'relative',
@@ -183,12 +213,12 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
                   width: '16px',
                   height: '16px',
                   borderRadius: '50%',
-                  background: '#00ff41',
+                  background: 'var(--accent-primary)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   fontSize: '10px',
-                  color: '#000',
+                  color: 'var(--bg-primary)',
                   fontWeight: 700,
                   zIndex: 2,
                 }}>
@@ -210,10 +240,10 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    border: `1px solid ${isTTOpen ? 'var(--accent)' : '#333'}`,
+                    border: `1px solid ${isTTOpen ? 'var(--accent-primary)' : 'var(--border-primary)'}`,
                     borderRadius: '2px',
-                    background: isTTOpen ? '#001a00' : '#111',
-                    color: isTTOpen ? 'var(--accent)' : '#555',
+                    background: isTTOpen ? 'var(--accent-bg)' : 'var(--bg-elevated)',
+                    color: isTTOpen ? 'var(--accent-primary)' : 'var(--text-dim)',
                     fontSize: '8px',
                     fontWeight: 700,
                     fontFamily: "'JetBrains Mono', monospace",
@@ -221,9 +251,9 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
                     zIndex: 2,
                     userSelect: 'none',
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent-primary)'; e.currentTarget.style.color = 'var(--accent-primary)' }}
                   onMouseLeave={(e) => {
-                    if (!isTTOpen) { e.currentTarget.style.borderColor = '#333'; e.currentTarget.style.color = '#555' }
+                    if (!isTTOpen) { e.currentTarget.style.borderColor = 'var(--border-primary)'; e.currentTarget.style.color = 'var(--text-dim)' }
                   }}
                   title="Show truth table"
                 >
@@ -244,7 +274,7 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
                   overflow: 'hidden',
                 }}
                 dangerouslySetInnerHTML={{
-                  __html: sym.svg(isHovered ? '#00ff41' : '#00cc33')
+                  __html: sym.svg(isHovered ? palette.accent : palette.accentSecondary)
                     .replace(/<svg /, '<svg style="width:100%;height:100%;max-width:100%;max-height:110px" preserveAspectRatio="xMidYMid meet" '),
                 }}
               />
@@ -259,7 +289,7 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
                   justifyContent: 'center',
                   fontSize: '9px',
                   fontWeight: 600,
-                  color: isHovered ? 'var(--accent)' : '#666',
+                  color: isHovered ? 'var(--accent-primary)' : 'var(--text-dim)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.5px',
                 }}
@@ -280,13 +310,13 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
             left: Math.min(ttState.x, window.innerWidth - 280),
             top: Math.min(ttState.y, window.innerHeight - 200),
             zIndex: 9999,
-            background: '#0a0a0a',
-            border: '1px solid #00ff41',
+            background: 'var(--tooltip-bg)',
+            border: '1px solid var(--accent-primary)',
             borderRadius: '4px',
             padding: '8px',
             fontFamily: "'JetBrains Mono', monospace",
             fontSize: '10px',
-            boxShadow: '0 4px 20px rgba(0,255,65,0.1), 0 4px 16px rgba(0,0,0,0.6)',
+            boxShadow: 'var(--shadow-popover)',
             maxWidth: '300px',
             maxHeight: '220px',
             overflow: 'auto',
@@ -298,8 +328,8 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
                 {ttState.table.headers.map((h, i) => (
                   <th key={i} style={{
                     padding: '3px 8px',
-                    borderBottom: '1px solid #1a4a1a',
-                    color: '#00ff41',
+                    borderBottom: '1px solid var(--border-accent)',
+                    color: 'var(--accent-primary)',
                     fontWeight: 600,
                     textAlign: 'center',
                     whiteSpace: 'nowrap',
@@ -315,8 +345,8 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
                   {row.map((cell, j) => (
                     <td key={j} style={{
                       padding: '2px 8px',
-                      borderBottom: i < ttState.table.rows.length - 1 ? '1px solid #111' : 'none',
-                      color: '#00cc33',
+                      borderBottom: i < ttState.table.rows.length - 1 ? '1px solid var(--border-primary)' : 'none',
+                      color: 'var(--accent-secondary)',
                       textAlign: 'center',
                       whiteSpace: 'nowrap',
                     }}>
