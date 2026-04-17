@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import Toolbar from './components/Toolbar.jsx'
 import EditorPane from './components/EditorPane.jsx'
 import WaveformViewer from './components/WaveformViewer.jsx'
@@ -6,6 +6,8 @@ import ProgressIndicator from './components/ProgressIndicator.jsx'
 import ChatBot from './components/ChatBot.jsx'
 import DiagramView from './components/DiagramView.jsx'
 import SymbolsLibrary from './components/SymbolsLibrary.jsx'
+import ProjectExplorer from './components/ProjectExplorer.jsx'
+import ContextPanel from './components/ContextPanel.jsx'
 import { DEFAULT_DESIGN, DEFAULT_TESTBENCH } from './defaults.js'
 
 const API_URL = 'http://localhost:8000'
@@ -89,6 +91,32 @@ function TabBar({ tabs, active, onChange }) {
   )
 }
 
+/**
+ * Parse module name and ports from Verilog code. Returns { name, portCount }.
+ * Uses a lightweight regex — good enough for ANSI port-list style modules.
+ */
+function parseDesignMeta(code) {
+  if (!code) return { name: 'untitled', portCount: 0 }
+  const nameMatch = code.match(/module\s+(\w+)/)
+  const name = nameMatch ? nameMatch[1] : 'untitled'
+
+  let portCount = 0
+  const modMatch = code.match(/module\s+\w+\s*\(([\s\S]*?)\)\s*;/)
+  if (modMatch) {
+    const portText = modMatch[1]
+    for (const decl of portText.split(',')) {
+      if (decl.trim().match(/^(input|output|inout)\b/)) portCount++
+    }
+  }
+  // Fallback: count "input"/"output"/"inout" statements in the body
+  if (portCount === 0) {
+    const bodyMatches = code.match(/^\s*(input|output|inout)\b/gm)
+    if (bodyMatches) portCount = bodyMatches.length
+  }
+
+  return { name, portCount }
+}
+
 function App() {
   const [design, setDesign] = useState(DEFAULT_DESIGN)
   const [testbench, setTestbench] = useState(DEFAULT_TESTBENCH)
@@ -97,22 +125,45 @@ function App() {
   const [generating, setGenerating] = useState(false)
   const [generateDone, setGenerateDone] = useState(false)
   const [error, setError] = useState(null)
-  const [splitPos, setSplitPos] = useState(50)
   const [prompt, setPrompt] = useState('')
   const [cancelled, setCancelled] = useState(null)
   const [chatAutoMessage, setChatAutoMessage] = useState(null)
+
+  // Tabs
+  const [editorTab, setEditorTab] = useState('DESIGN.V')
   const [bottomTab, setBottomTab] = useState('CONSOLE')
+
+  // Panels / sizing
   const [bottomHeight, setBottomHeight] = useState(250)
+  const [leftWidth, setLeftWidth] = useState(280)
+  const [leftSplitPos, setLeftSplitPos] = useState(45) // % for project explorer vs symbols
   const [rightWidth, setRightWidth] = useState(400)
-  const [rightSplitPos, setRightSplitPos] = useState(50) // % for symbols vs chat
+  const [rightSplitPos, setRightSplitPos] = useState(55) // % for chat vs context
+
+  // Symbols + verify + save status
   const [selectedSymbols, setSelectedSymbols] = useState([])
   const [autoPrompt, setAutoPrompt] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [verifyReport, setVerifyReport] = useState(null)
+  const [savedDesign, setSavedDesign] = useState(DEFAULT_DESIGN)
+  const [projectSearch, setProjectSearch] = useState('')
+  const [symbolsCollapsed, setSymbolsCollapsed] = useState(false)
+
+  // Refs
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
   const verifyControllerRef = useRef(null)
   const designEditorRef = useRef(null)
+
+  // --- Derived meta from design code ---
+  const { name: moduleName, portCount } = useMemo(() => parseDesignMeta(design), [design])
+  const hasRealCode = (code) => code.replace(/\/\/.*$/gm, '').trim().length > 0
+  const canSimulate = hasRealCode(design) && hasRealCode(testbench)
+  const canVerify = hasRealCode(design)
+  const isModified = design !== savedDesign
+  const projectStatus = savedDesign !== DEFAULT_DESIGN
+    ? (isModified ? 'Modified' : 'Saved')
+    : ''
 
   // --- Handlers ---
 
@@ -133,7 +184,8 @@ function App() {
       const data = await resp.json()
       if (!data.success) setError(data.stderr || 'Compilation failed')
       setSimResult(data)
-      if (data.signals?.length) setBottomTab('WAVEFORM')
+      // Waveforms moved to the top tabs — auto-switch to WAVEFORM when we have signals
+      if (data.signals?.length) setEditorTab('WAVEFORM')
     } catch (e) {
       if (e.name === 'AbortError') { setCancelled('simulate'); setTimeout(() => setCancelled(null), 2000) }
       else setError(e.message)
@@ -162,10 +214,11 @@ function App() {
       const data = await resp.json()
       setDesign(data.design)
       setTestbench(data.testbench)
+      setSavedDesign(data.design)        // mark as just-saved
       setGenerateDone(true)
       setTimeout(() => setGenerateDone(false), 3000)
       setChatAutoMessage(`explain-${Date.now()}`)
-      setBottomTab('DIAGRAM')
+      setEditorTab('DESIGN.V')            // stay on DESIGN.V after generate
     } catch (e) {
       if (e.name === 'AbortError') { setCancelled('generate'); setTimeout(() => setCancelled(null), 2000) }
       else setError(e.message)
@@ -191,7 +244,7 @@ function App() {
       if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`) }
       const data = await resp.json()
       setVerifyReport(data)
-      setBottomTab('VERIFY')
+      setBottomTab('VERIFICATION')
     } catch (e) {
       if (e.name === 'AbortError') { setCancelled('verify'); setTimeout(() => setCancelled(null), 2000) }
       else setError(e.message)
@@ -199,20 +252,6 @@ function App() {
   }, [design, prompt])
 
   const handleCancelVerify = useCallback(() => { verifyControllerRef.current?.abort() }, [])
-
-  // Editor split
-  const handleEditorSplit = useCallback((e) => {
-    e.preventDefault()
-    const container = e.target.parentElement
-    const rect = container.getBoundingClientRect()
-    const onMouseMove = (e) => {
-      const pct = ((e.clientX - rect.left) / rect.width) * 100
-      setSplitPos(Math.max(20, Math.min(80, pct)))
-    }
-    const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp) }
-    document.addEventListener('mousemove', onMouseMove)
-    document.addEventListener('mouseup', onMouseUp)
-  }, [])
 
   // Bottom panel height
   const handleBottomResize = useCallback((e) => {
@@ -228,6 +267,34 @@ function App() {
     document.addEventListener('mouseup', onMouseUp)
   }, [bottomHeight])
 
+  // Left panel width
+  const handleLeftResize = useCallback((e) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = leftWidth
+    const onMouseMove = (e) => {
+      const delta = e.clientX - startX
+      setLeftWidth(Math.max(200, Math.min(500, startW + delta)))
+    }
+    const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp) }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [leftWidth])
+
+  // Left panel vertical split
+  const handleLeftSplitResize = useCallback((e) => {
+    e.preventDefault()
+    const container = e.target.parentElement
+    const rect = container.getBoundingClientRect()
+    const onMouseMove = (e) => {
+      const pct = ((e.clientY - rect.top) / rect.height) * 100
+      setLeftSplitPos(Math.max(15, Math.min(85, pct)))
+    }
+    const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp) }
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }, [])
+
   // Right panel width
   const handleRightResize = useCallback((e) => {
     e.preventDefault()
@@ -242,13 +309,11 @@ function App() {
     document.addEventListener('mouseup', onMouseUp)
   }, [rightWidth])
 
-  // Right panel vertical split (symbols vs chat)
+  // Right panel vertical split (chat vs context)
   const handleRightSplitResize = useCallback((e) => {
     e.preventDefault()
     const container = e.target.parentElement
     const rect = container.getBoundingClientRect()
-    const startY = e.clientY
-    const startPct = rightSplitPos
     const onMouseMove = (e) => {
       const pct = ((e.clientY - rect.top) / rect.height) * 100
       setRightSplitPos(Math.max(15, Math.min(85, pct)))
@@ -256,7 +321,7 @@ function App() {
     const onMouseUp = () => { document.removeEventListener('mousemove', onMouseMove); document.removeEventListener('mouseup', onMouseUp) }
     document.addEventListener('mousemove', onMouseMove)
     document.addEventListener('mouseup', onMouseUp)
-  }, [rightSplitPos])
+  }, [])
 
   // Symbol click: toggle in selectedSymbols array
   const handleSelectSymbol = useCallback((symbol) => {
@@ -306,9 +371,9 @@ function App() {
     }
   }, [autoPrompt])
 
-  const hasRealCode = (code) => code.replace(/\/\/.*$/gm, '').trim().length > 0
-  const canSimulate = hasRealCode(design) && hasRealCode(testbench)
-  const canVerify = hasRealCode(design)
+  // File-tree click handlers — just switch the active editor tab
+  const handleSelectDesignFile = useCallback(() => setEditorTab('DESIGN.V'), [])
+  const handleSelectTestbenchFile = useCallback(() => setEditorTab('TB_DESIGN.V'), [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#000' }}>
@@ -330,45 +395,113 @@ function App() {
         onCancelVerify={handleCancelVerify}
         verifying={verifying}
         canVerify={canVerify}
+        projectName={moduleName}
+        projectStatus={projectStatus}
+        projectSearch={projectSearch}
+        setProjectSearch={setProjectSearch}
       />
       <ProgressIndicator active={generating} done={generateDone} />
 
-      {/* Middle: Left area + Right panel */}
+      {/* Middle: Left sidebar + Center + Right sidebar */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
 
-        {/* LEFT AREA */}
+        {/* LEFT SIDEBAR */}
+        <div style={{ width: `${leftWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, background: '#000' }}>
+          <div style={{ height: `${leftSplitPos}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <ProjectExplorer
+              moduleName={moduleName}
+              hasDesign={hasRealCode(design)}
+              hasTestbench={hasRealCode(testbench)}
+              hasSimResult={!!simResult?.signals?.length}
+              hasErrors={simResult?.stderr ? true : false}
+              activeEditorTab={editorTab}
+              onSelectDesign={handleSelectDesignFile}
+              onSelectTestbench={handleSelectTestbenchFile}
+            />
+          </div>
+          <div
+            onMouseDown={handleLeftSplitResize}
+            style={{ height: '4px', cursor: 'row-resize', background: 'var(--border)', flexShrink: 0, transition: 'background 0.15s' }}
+            onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
+            onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
+          />
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <CollapsibleSymbolsHeader
+              collapsed={symbolsCollapsed}
+              onToggle={() => setSymbolsCollapsed(!symbolsCollapsed)}
+            />
+            {!symbolsCollapsed && (
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <SymbolsLibrary
+                  onSelectSymbol={handleSelectSymbol}
+                  selectedIds={selectedSymbols.map((s) => s.id)}
+                  onClear={handleClearSymbols}
+                  showHeader={false}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Left sidebar drag handle */}
+        <div
+          onMouseDown={handleLeftResize}
+          style={{ width: '4px', cursor: 'col-resize', background: 'var(--border)', flexShrink: 0, transition: 'background 0.15s' }}
+          onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
+          onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
+        />
+
+        {/* CENTER AREA */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
 
-          {/* Editors */}
-          <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-            <div style={{ width: `${splitPos}%`, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '3px 12px', background: 'var(--toolbar-bg)', borderBottom: '1px solid var(--border)', fontSize: '10px', color: 'var(--accent)', fontWeight: 500, letterSpacing: '1px', fontFamily: "'JetBrains Mono', monospace" }}>
-                DESIGN.V
-              </div>
-              <div style={{ flex: 1, minHeight: 0 }}>
+          {/* Top: tabbed editors/views */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <TabBar
+              tabs={['DESIGN.V', 'TB_DESIGN.V', 'SCHEMATIC', 'WAVEFORM']}
+              active={editorTab}
+              onChange={setEditorTab}
+            />
+            <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+              {/* Editors stay mounted to preserve state; toggled via display */}
+              <div style={{
+                height: '100%',
+                display: editorTab === 'DESIGN.V' ? 'block' : 'none',
+              }}>
                 <EditorPane ref={designEditorRef} value={design} onChange={setDesign} />
               </div>
-            </div>
-            <div
-              onMouseDown={handleEditorSplit}
-              style={{ width: '2px', cursor: 'col-resize', background: 'var(--border)', flexShrink: 0, transition: 'background 0.15s' }}
-              onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
-              onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
-            />
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-              <div style={{ padding: '3px 12px', background: 'var(--toolbar-bg)', borderBottom: '1px solid var(--border)', fontSize: '10px', color: 'var(--accent)', fontWeight: 500, letterSpacing: '1px', fontFamily: "'JetBrains Mono', monospace" }}>
-                TESTBENCH.V
-              </div>
-              <div style={{ flex: 1, minHeight: 0 }}>
+              <div style={{
+                height: '100%',
+                display: editorTab === 'TB_DESIGN.V' ? 'block' : 'none',
+              }}>
                 <EditorPane value={testbench} onChange={setTestbench} />
               </div>
+              {editorTab === 'SCHEMATIC' && (
+                <DiagramView design={design} />
+              )}
+              {editorTab === 'WAVEFORM' && (
+                simResult?.signals?.length > 0 ? (
+                  <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} />
+                ) : (
+                  <div style={{
+                    height: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#222',
+                    fontSize: '11px',
+                    fontFamily: "'JetBrains Mono', monospace",
+                  }}>
+                    Run a simulation to see waveforms
+                  </div>
+                )
+              )}
             </div>
           </div>
 
           {/* Bottom tabbed panel */}
           <HorizDragHandle onMouseDown={handleBottomResize} />
           <div style={{ height: `${bottomHeight}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <TabBar tabs={['CONSOLE', 'WAVEFORM', 'DIAGRAM', 'VERIFY', 'EXAMPLES']} active={bottomTab} onChange={setBottomTab} />
+            <TabBar tabs={['CONSOLE', 'VERIFICATION', 'EXAMPLES']} active={bottomTab} onChange={setBottomTab} />
             <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
               {bottomTab === 'CONSOLE' && (
                 <div style={{ height: '100%', overflow: 'auto', padding: '6px 12px', fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-dim)' }}>
@@ -379,21 +512,7 @@ function App() {
                   )}
                 </div>
               )}
-              {bottomTab === 'WAVEFORM' && (
-                <div style={{ height: '100%' }}>
-                  {simResult?.signals?.length > 0 ? (
-                    <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} />
-                  ) : (
-                    <div style={{ color: '#222', padding: '20px', textAlign: 'center', fontSize: '11px', fontFamily: "'JetBrains Mono', monospace" }}>
-                      Run a simulation to see waveforms
-                    </div>
-                  )}
-                </div>
-              )}
-              {bottomTab === 'DIAGRAM' && (
-                <DiagramView design={design} />
-              )}
-              {bottomTab === 'VERIFY' && (
+              {bottomTab === 'VERIFICATION' && (
                 <div style={{ height: '100%', overflow: 'auto', padding: '12px 16px', fontSize: '12px', fontFamily: "'JetBrains Mono', monospace", color: '#aaa', lineHeight: '1.6' }}>
                   {verifying && (
                     <div style={{ color: 'var(--accent)', textAlign: 'center', padding: '20px' }}>
@@ -474,25 +593,9 @@ function App() {
           onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
         />
 
-        {/* RIGHT AREA: Symbols Library + Chat */}
+        {/* RIGHT SIDEBAR: Volta Assistant + Context Panel */}
         <div style={{ width: `${rightWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          {/* Symbols Library */}
           <div style={{ height: `${rightSplitPos}%`, overflow: 'hidden' }}>
-            <SymbolsLibrary
-              onSelectSymbol={handleSelectSymbol}
-              selectedIds={selectedSymbols.map((s) => s.id)}
-              onClear={handleClearSymbols}
-            />
-          </div>
-          {/* Horizontal split handle */}
-          <div
-            onMouseDown={handleRightSplitResize}
-            style={{ height: '4px', cursor: 'row-resize', background: 'var(--border)', flexShrink: 0, transition: 'background 0.15s' }}
-            onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
-            onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
-          />
-          {/* Chat */}
-          <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
             <ChatBot
               design={design}
               testbench={testbench}
@@ -501,8 +604,53 @@ function App() {
               selectedSymbols={selectedSymbols}
             />
           </div>
+          <div
+            onMouseDown={handleRightSplitResize}
+            style={{ height: '4px', cursor: 'row-resize', background: 'var(--border)', flexShrink: 0, transition: 'background 0.15s' }}
+            onMouseEnter={(e) => e.target.style.background = 'var(--accent)'}
+            onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
+          />
+          <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+            <ContextPanel
+              moduleName={moduleName}
+              portCount={portCount}
+              gateCount={null}
+            />
+          </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Small header above the Symbols Library in the left sidebar. */
+function CollapsibleSymbolsHeader({ collapsed, onToggle }) {
+  return (
+    <div
+      onClick={onToggle}
+      style={{
+        padding: '4px 10px',
+        fontSize: '10px',
+        color: 'var(--accent)',
+        fontWeight: 600,
+        background: 'var(--toolbar-bg)',
+        borderBottom: '1px solid var(--border)',
+        letterSpacing: '2px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        cursor: 'pointer',
+        userSelect: 'none',
+        flexShrink: 0,
+      }}
+    >
+      <span style={{
+        fontSize: '8px',
+        display: 'inline-block',
+        transition: 'transform 0.15s',
+        transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
+      }}>▼</span>
+      COLLAPSIBLE SYMBOLS LIBRARY
     </div>
   )
 }

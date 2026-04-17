@@ -27,6 +27,10 @@ export default function Toolbar({
   cancelled,
   canSimulate = true,
   canVerify = false,
+  projectName = 'untitled',
+  projectStatus = '',
+  projectSearch = '',
+  setProjectSearch = () => {},
 }) {
 
   const handleGenerate = () => {
@@ -63,6 +67,55 @@ export default function Toolbar({
       }}>
         VOLTA
       </div>
+
+      {/* Project label + status */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        flexShrink: 0,
+        fontFamily: "'JetBrains Mono', monospace",
+      }}>
+        <span style={{ color: '#555', fontSize: '11px' }}>Project:</span>
+        <span style={{ color: 'var(--accent)', fontSize: '11px', fontWeight: 600 }}>
+          {projectName}
+        </span>
+        {projectStatus && (
+          <span style={{
+            color: projectStatus === 'Modified' ? '#ccaa00' : '#00cc33',
+            fontSize: '9px',
+            letterSpacing: '0.5px',
+            border: `1px solid ${projectStatus === 'Modified' ? '#4a3a00' : '#1a4a1a'}`,
+            borderRadius: '2px',
+            padding: '1px 6px',
+            background: projectStatus === 'Modified' ? '#1a1400' : '#001a00',
+          }}>
+            {projectStatus === 'Modified' ? 'Modified' : 'Saved: Just now'}
+          </span>
+        )}
+      </div>
+
+      {/* Project Search Input (placeholder) */}
+      <input
+        type="text"
+        value={projectSearch}
+        onChange={(e) => setProjectSearch(e.target.value)}
+        placeholder="Project Search Input"
+        aria-label="Project Search Input"
+        style={{
+          width: '140px',
+          flexShrink: 0,
+          background: '#000',
+          border: '1px solid #1a1a1a',
+          borderRadius: '2px',
+          padding: '3px 8px',
+          color: 'var(--text-primary)',
+          fontSize: '10px',
+          fontFamily: "'JetBrains Mono', monospace",
+          outline: 'none',
+          caretColor: 'var(--accent)',
+        }}
+      />
 
       <div style={{ width: '1px', height: '18px', background: 'var(--border)', flexShrink: 0 }} />
 
@@ -131,50 +184,52 @@ export default function Toolbar({
             caretColor: 'var(--accent)',
           }}
         />
-        {generating ? (
-          <button
-            onClick={onCancelGenerate}
-            style={{
-              padding: '2px 8px',
-              border: '1px solid #ff4444',
-              borderRadius: '3px',
-              background: 'transparent',
-              color: '#ff4444',
-              fontSize: '10px',
-              fontWeight: 600,
-              fontFamily: "'JetBrains Mono', monospace",
-              cursor: 'pointer',
-              flexShrink: 0,
-            }}
-            onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
-            onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
-          >
-            CANCEL
-          </button>
-        ) : (
-          <button
-            onClick={handleGenerate}
-            disabled={!prompt.trim()}
-            style={{
-              padding: '2px 8px',
-              border: '1px solid var(--accent)',
-              borderRadius: '3px',
-              background: 'transparent',
-              color: 'var(--accent)',
-              fontSize: '10px',
-              fontWeight: 600,
-              fontFamily: "'JetBrains Mono', monospace",
-              cursor: !prompt.trim() ? 'default' : 'pointer',
-              opacity: !prompt.trim() ? 0.4 : 1,
-              flexShrink: 0,
-            }}
-            onMouseEnter={(e) => { if (prompt.trim()) { e.target.style.background = 'var(--accent)'; e.target.style.color = '#000' } }}
-            onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = 'var(--accent)' }}
-          >
-            GENERATE
-          </button>
-        )}
       </div>
+
+      {/* GENERATE button (moved to right end) */}
+      {generating ? (
+        <button
+          onClick={onCancelGenerate}
+          style={{
+            padding: '3px 10px',
+            border: '1px solid #ff4444',
+            borderRadius: '3px',
+            background: 'transparent',
+            color: '#ff4444',
+            fontSize: '11px',
+            fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { e.target.style.background = '#ff4444'; e.target.style.color = '#000' }}
+          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = '#ff4444' }}
+        >
+          CANCEL
+        </button>
+      ) : (
+        <button
+          onClick={handleGenerate}
+          disabled={!prompt.trim()}
+          style={{
+            padding: '3px 10px',
+            border: `1px solid ${prompt.trim() ? 'var(--accent)' : 'var(--border)'}`,
+            borderRadius: '3px',
+            background: 'transparent',
+            color: prompt.trim() ? 'var(--accent)' : '#333',
+            fontSize: '11px',
+            fontWeight: 600,
+            fontFamily: "'JetBrains Mono', monospace",
+            cursor: !prompt.trim() ? 'default' : 'pointer',
+            opacity: !prompt.trim() ? 0.6 : 1,
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { if (prompt.trim()) { e.target.style.background = 'var(--accent)'; e.target.style.color = '#000' } }}
+          onMouseLeave={(e) => { e.target.style.background = 'transparent'; e.target.style.color = prompt.trim() ? 'var(--accent)' : '#333' }}
+        >
+          GENERATE
+        </button>
+      )}
 
       {/* Simulate button */}
       {simulating ? (
