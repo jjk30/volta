@@ -17,7 +17,7 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
-  // Expose insertAtCursor to parent via ref
+  // Expose imperative helpers to parent via ref
   useImperativeHandle(ref, () => ({
     insertAtCursor(text) {
       const view = viewRef.current
@@ -27,6 +27,18 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
       view.dispatch({
         changes: { from: pos, insert },
         selection: { anchor: pos + insert.length },
+      })
+      view.focus()
+    },
+    scrollToLine(lineNumber) {
+      const view = viewRef.current
+      if (!view || !lineNumber) return
+      const total = view.state.doc.lines
+      const clamped = Math.max(1, Math.min(total, lineNumber))
+      const line = view.state.doc.line(clamped)
+      view.dispatch({
+        selection: { anchor: line.from, head: line.to },
+        effects: EditorView.scrollIntoView(line.from, { y: 'center' }),
       })
       view.focus()
     },

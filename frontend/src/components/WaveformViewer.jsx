@@ -1,8 +1,12 @@
 import { useRef, useEffect } from 'react'
 
-const COLORS = [
+const COLORS_DARK = [
   '#00ff41', '#00cc33', '#4ec9b0', '#d4a017',
   '#9d7cd8', '#6a9955', '#c75050', '#888888',
+]
+const COLORS_LIGHT = [
+  '#006622', '#008833', '#2a8c7a', '#a07509',
+  '#5a3a8a', '#3a6a2a', '#a03030', '#444444',
 ]
 
 const LABEL_WIDTH = 120
@@ -16,12 +20,22 @@ const BUS_HEIGHT = 22
 const GRID_MAJOR = 80
 const GRID_MINOR = 20
 
-export default function WaveformViewer({ signals, endTime }) {
+export default function WaveformViewer({ signals, endTime, theme = 'dark' }) {
   const canvasRef = useRef(null)
 
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !signals?.length) return
+
+    const cs = getComputedStyle(document.documentElement)
+    const get = (name, fallback) => (cs.getPropertyValue(name) || fallback).trim() || fallback
+    const bg = get('--waveform-bg', '#000000')
+    const minorGrid = get('--waveform-grid-minor', '#0a1a0a')
+    const majorGrid = get('--waveform-grid-major', '#0d2a0d')
+    const axisColor = get('--waveform-axis', '#1a3a1a')
+    const labelColor = get('--waveform-label', '#00ff4160')
+    const separator = get('--waveform-trace-separator', '#0d1a0d')
+    const COLORS = theme === 'light' ? COLORS_LIGHT : COLORS_DARK
 
     const container = canvas.parentElement
     const dpr = window.devicePixelRatio || 1
@@ -36,13 +50,12 @@ export default function WaveformViewer({ signals, endTime }) {
     const ctx = canvas.getContext('2d')
     ctx.scale(dpr, dpr)
 
-    // Pure black background
-    ctx.fillStyle = '#000000'
+    // Background
+    ctx.fillStyle = bg
     ctx.fillRect(0, 0, width, height)
 
-    // Oscilloscope grid — subtle green lines
-    // Minor grid
-    ctx.strokeStyle = '#0a1a0a'
+    // Oscilloscope grid — subtle lines
+    ctx.strokeStyle = minorGrid
     ctx.lineWidth = 0.5
     for (let x = LABEL_WIDTH; x < width; x += GRID_MINOR) {
       ctx.beginPath()
@@ -58,7 +71,7 @@ export default function WaveformViewer({ signals, endTime }) {
     }
 
     // Major grid
-    ctx.strokeStyle = '#0d2a0d'
+    ctx.strokeStyle = majorGrid
     ctx.lineWidth = 0.5
     for (let x = LABEL_WIDTH; x < width; x += GRID_MAJOR) {
       ctx.beginPath()
@@ -77,7 +90,7 @@ export default function WaveformViewer({ signals, endTime }) {
     const tMax = endTime || 1
 
     // Time axis
-    ctx.strokeStyle = '#1a3a1a'
+    ctx.strokeStyle = axisColor
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(LABEL_WIDTH, PADDING_TOP - 5)
@@ -85,7 +98,7 @@ export default function WaveformViewer({ signals, endTime }) {
     ctx.stroke()
 
     // Time labels
-    ctx.fillStyle = '#00ff4160'
+    ctx.fillStyle = labelColor
     ctx.font = '10px "JetBrains Mono", monospace'
     ctx.textAlign = 'center'
     const nTicks = Math.min(10, Math.max(4, Math.floor(traceWidth / 80)))
@@ -102,13 +115,13 @@ export default function WaveformViewer({ signals, endTime }) {
       const midY = y + ROW_HEIGHT / 2
 
       // Label
-      ctx.fillStyle = '#00ff4190'
+      ctx.fillStyle = labelColor
       ctx.font = '11px "JetBrains Mono", monospace'
       ctx.textAlign = 'right'
       ctx.fillText(sig.name, LABEL_WIDTH - 10, midY + 4)
 
       // Separator line
-      ctx.strokeStyle = '#0d1a0d'
+      ctx.strokeStyle = separator
       ctx.lineWidth = 1
       ctx.beginPath()
       ctx.moveTo(LABEL_WIDTH, y + ROW_HEIGHT)
@@ -190,13 +203,13 @@ export default function WaveformViewer({ signals, endTime }) {
         }
       }
     })
-  }, [signals, endTime])
+  }, [signals, endTime, theme])
 
   return (
     <div style={{
       height: '100%',
       overflow: 'auto',
-      background: '#000',
+      background: 'var(--waveform-bg)',
     }}>
       <div style={{
         padding: '4px 12px',

@@ -6,24 +6,119 @@
   box-sizing: border-box;
 }
 
-:root {
+/* ============================================================== */
+/*                    DARK THEME (default)                         */
+/* ============================================================== */
+:root,
+[data-theme="dark"] {
   --bg-primary: #000000;
   --bg-secondary: #0a0a0a;
   --bg-surface: #000000;
+  --bg-elevated: #050505;
+  --bg-hover: #0a1a0a;
+  --bg-code: #0a1a0a;
+
   --text-primary: #e0e0e0;
   --text-secondary: #888888;
   --text-dim: #444444;
+  --text-muted: #333333;
+
   --accent: #00ff41;
   --accent-secondary: #00cc33;
   --accent-dim: #00ff4120;
+  --accent-bg: #001a00;
   --accent-glow: 0 0 10px #00ff4140, 0 0 20px #00ff4120;
+
   --green: #00ff41;
   --red: #ff4444;
   --yellow: #ccaa00;
   --amber: #d4a017;
+
   --border: #1a1a1a;
+  --border-accent: #1a4a1a;
   --border-light: #2a2a2a;
+
   --toolbar-bg: #050505;
+  --panel-bg: #0a0a0a;
+
+  --chat-user-bg: #001a00;
+  --chat-assistant-bg: #0a0a0a;
+  --chat-user-text: #00ff41;
+  --chat-assistant-text: #aaaaaa;
+
+  --tooltip-bg: #0a0a0a;
+  --error-bg: #1a0505;
+
+  /* Schematic-specific */
+  --schematic-accent: #00ff41;
+  --schematic-wire: #00cc33;
+  --schematic-highlight: #00ff41;
+  --schematic-error: #ff4444;
+
+  /* Waveform-specific */
+  --waveform-bg: #000000;
+  --waveform-grid-minor: #0a1a0a;
+  --waveform-grid-major: #0d2a0d;
+  --waveform-axis: #1a3a1a;
+  --waveform-label: #00ff4160;
+  --waveform-trace-separator: #0d1a0d;
+}
+
+/* ============================================================== */
+/*                    LIGHT THEME                                  */
+/* ============================================================== */
+[data-theme="light"] {
+  --bg-primary: #f5f5f0;
+  --bg-secondary: #ffffff;
+  --bg-surface: #ffffff;
+  --bg-elevated: #e8e8e0;
+  --bg-hover: #dfefd8;
+  --bg-code: #f0f8ec;
+
+  --text-primary: #1a1a1a;
+  --text-secondary: #555555;
+  --text-dim: #888888;
+  --text-muted: #b0b0b0;
+
+  --accent: #006622;
+  --accent-secondary: #008833;
+  --accent-dim: #00662225;
+  --accent-bg: #d8efd8;
+  --accent-glow: 0 0 8px #00662230;
+
+  --green: #006622;
+  --red: #cc2222;
+  --yellow: #b8860b;
+  --amber: #996600;
+
+  --border: #d0d0d0;
+  --border-accent: #a0c0a0;
+  --border-light: #b0b0b0;
+
+  --toolbar-bg: #ebebe3;
+  --panel-bg: #f0f0ec;
+
+  --chat-user-bg: #d8efd8;
+  --chat-assistant-bg: #ffffff;
+  --chat-user-text: #006622;
+  --chat-assistant-text: #333333;
+
+  --tooltip-bg: #ffffff;
+  --error-bg: #fdecec;
+
+  /* Schematic-specific */
+  --schematic-accent: #006622;
+  --schematic-wire: #008833;
+  --schematic-highlight: #006622;
+  --schematic-error: #cc2222;
+
+  /* Waveform-specific */
+  --waveform-bg: #fafaf5;
+  --waveform-grid-minor: #e5ead5;
+  --waveform-grid-major: #c8d8b8;
+  --waveform-axis: #90a890;
+  --waveform-label: #00662280;
+  --waveform-trace-separator: #d8e0d0;
 }
 
 html, body, #root {
@@ -33,13 +128,16 @@ html, body, #root {
   font-family: 'JetBrains Mono', monospace;
   background: var(--bg-primary);
   color: var(--text-primary);
+  transition: background-color 0.15s;
 }
 
-/* CodeMirror theme overrides */
+/* ==============================================================
+   CodeMirror theme overrides
+   ============================================================== */
 .cm-editor {
   height: 100%;
   font-size: 13px;
-  background: #000000 !important;
+  background: var(--bg-primary) !important;
 }
 
 .cm-editor .cm-scroller {
@@ -55,18 +153,60 @@ html, body, #root {
 }
 
 .cm-editor .cm-gutters {
-  background: #050505 !important;
+  background: var(--bg-elevated) !important;
   border-right: 1px solid var(--border) !important;
-  color: #00ff4160 !important;
+  color: var(--accent) !important;
+  opacity: 0.6;
 }
 
 .cm-editor .cm-activeLineGutter {
-  background: #0a0a0a !important;
+  background: var(--bg-secondary) !important;
   color: var(--accent) !important;
+  opacity: 1;
 }
 
 .cm-editor .cm-activeLine {
-  background: rgba(0, 255, 65, 0.03) !important;
+  background: var(--accent-dim) !important;
+}
+
+/* Light-mode CodeMirror syntax overrides (oneDark theme is inherently dark) */
+[data-theme="light"] .cm-editor {
+  color: #1a1a1a;
+}
+[data-theme="light"] .cm-editor .cm-content {
+  color: #1a1a1a !important;
+}
+[data-theme="light"] .cm-editor .tok-keyword,
+[data-theme="light"] .cm-editor .tok-modifier,
+[data-theme="light"] .cm-editor .tok-definitionKeyword,
+[data-theme="light"] .cm-editor .tok-controlKeyword {
+  color: #006622 !important;
+}
+[data-theme="light"] .cm-editor .tok-string,
+[data-theme="light"] .cm-editor .tok-string2 {
+  color: #cc2222 !important;
+}
+[data-theme="light"] .cm-editor .tok-comment,
+[data-theme="light"] .cm-editor .tok-lineComment,
+[data-theme="light"] .cm-editor .tok-blockComment {
+  color: #888 !important;
+  font-style: italic;
+}
+[data-theme="light"] .cm-editor .tok-number,
+[data-theme="light"] .cm-editor .tok-bool {
+  color: #b8860b !important;
+}
+[data-theme="light"] .cm-editor .tok-variableName,
+[data-theme="light"] .cm-editor .tok-propertyName {
+  color: #1a1a1a !important;
+}
+[data-theme="light"] .cm-editor .tok-typeName {
+  color: #006622 !important;
+  font-weight: 500;
+}
+[data-theme="light"] .cm-editor .tok-operator,
+[data-theme="light"] .cm-editor .tok-punctuation {
+  color: #555 !important;
 }
 
 /* Lint: wavy underlines — override CM default colors with our red/amber */
@@ -86,9 +226,9 @@ html, body, #root {
 /* Lint: tooltip styling */
 .cm-tooltip.cm-tooltip-hover,
 .cm-tooltip-lint {
-  background-color: #0a0a0a !important;
-  border: 1px solid #1a4a1a !important;
-  color: #ccc !important;
+  background-color: var(--tooltip-bg) !important;
+  border: 1px solid var(--border-accent) !important;
+  color: var(--text-primary) !important;
   font-family: 'JetBrains Mono', monospace !important;
   font-size: 11px !important;
   border-radius: 3px !important;
@@ -130,9 +270,10 @@ html, body, #root {
   100% { stroke: #00ff4120; }
 }
 
-/* Terminal input placeholder — green and dim */
+/* Terminal input placeholder */
 input::placeholder {
-  color: #00ff4140;
+  color: var(--text-dim);
+  opacity: 0.7;
   font-family: 'JetBrains Mono', monospace;
 }
 
@@ -152,5 +293,5 @@ input::placeholder {
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #333;
+  background: var(--accent-secondary);
 }
