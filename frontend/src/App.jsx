@@ -5,6 +5,7 @@ import WaveformViewer from './components/WaveformViewer.jsx'
 import ProgressIndicator from './components/ProgressIndicator.jsx'
 import ChatBot from './components/ChatBot.jsx'
 import DiagramView from './components/DiagramView.jsx'
+import SchematicView from './components/SchematicView.jsx'
 import SymbolsLibrary from './components/SymbolsLibrary.jsx'
 import ProjectExplorer from './components/ProjectExplorer.jsx'
 import ContextPanel from './components/ContextPanel.jsx'
@@ -148,6 +149,20 @@ function App() {
   const [savedDesign, setSavedDesign] = useState(DEFAULT_DESIGN)
   const [projectSearch, setProjectSearch] = useState('')
   const [symbolsCollapsed, setSymbolsCollapsed] = useState(false)
+
+  // Theme (persisted in localStorage)
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem('volta-theme')
+      if (saved === 'dark' || saved === 'light') return saved
+    } catch {}
+    return 'dark'
+  })
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+    try { localStorage.setItem('volta-theme', theme) } catch {}
+  }, [theme])
+  const toggleTheme = useCallback(() => setTheme((t) => t === 'dark' ? 'light' : 'dark'), [])
 
   // Refs
   const generateControllerRef = useRef(null)
@@ -375,6 +390,13 @@ function App() {
   const handleSelectDesignFile = useCallback(() => setEditorTab('DESIGN.V'), [])
   const handleSelectTestbenchFile = useCallback(() => setEditorTab('TB_DESIGN.V'), [])
 
+  // Schematic gate click: jump to Design.v and highlight the line
+  const handleGateClick = useCallback((lineNumber) => {
+    setEditorTab('DESIGN.V')
+    // Wait for the editor div to become display:block before scrolling
+    setTimeout(() => designEditorRef.current?.scrollToLine?.(lineNumber), 60)
+  }, [])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#000' }}>
       {/* Top: Toolbar */}
@@ -399,6 +421,8 @@ function App() {
         projectStatus={projectStatus}
         projectSearch={projectSearch}
         setProjectSearch={setProjectSearch}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
       <ProgressIndicator active={generating} done={generateDone} />
 
@@ -457,7 +481,7 @@ function App() {
           {/* Top: tabbed editors/views */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <TabBar
-              tabs={['DESIGN.V', 'TB_DESIGN.V', 'SCHEMATIC', 'WAVEFORM']}
+              tabs={['DESIGN.V', 'TB_DESIGN.V', 'SCHEMATIC', 'DIAGRAM', 'WAVEFORM']}
               active={editorTab}
               onChange={setEditorTab}
             />
@@ -476,18 +500,25 @@ function App() {
                 <EditorPane value={testbench} onChange={setTestbench} />
               </div>
               {editorTab === 'SCHEMATIC' && (
-                <DiagramView design={design} />
+                <SchematicView
+                  design={design}
+                  hasErrors={!!simResult?.stderr}
+                  onGateClick={handleGateClick}
+                />
+              )}
+              {editorTab === 'DIAGRAM' && (
+                <DiagramView design={design} theme={theme} />
               )}
               {editorTab === 'WAVEFORM' && (
                 simResult?.signals?.length > 0 ? (
-                  <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} />
+                  <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} theme={theme} />
                 ) : (
                   <div style={{
                     height: '100%',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: '#222',
+                    color: 'var(--text-dim)',
                     fontSize: '11px',
                     fontFamily: "'JetBrains Mono', monospace",
                   }}>

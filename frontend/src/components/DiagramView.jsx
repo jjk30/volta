@@ -29,12 +29,20 @@ function parseDesign(verilog) {
   return { name, inputs, outputs }
 }
 
-export default function DiagramView({ design }) {
+export default function DiagramView({ design, theme = 'dark' }) {
   const svgRef = useRef(null)
 
   useEffect(() => {
     const svg = svgRef.current
     if (!svg) return
+
+    // Read theme-specific colors from CSS variables so the diagram re-skins
+    // cleanly when the user toggles light/dark mode.
+    const cs = getComputedStyle(document.documentElement)
+    const accent = (cs.getPropertyValue('--accent') || '#00ff41').trim() || '#00ff41'
+    const accentSecondary = (cs.getPropertyValue('--accent-secondary') || '#00cc33').trim() || '#00cc33'
+    const textDim = (cs.getPropertyValue('--text-dim') || '#333').trim() || '#333'
+    const accentFill = theme === 'light' ? `${accent}12` : `${accent}08`
 
     // Clear previous
     while (svg.firstChild) svg.removeChild(svg.firstChild)
@@ -46,7 +54,7 @@ export default function DiagramView({ design }) {
       t.setAttribute('x', '50%')
       t.setAttribute('y', '50%')
       t.setAttribute('text-anchor', 'middle')
-      t.setAttribute('fill', '#333')
+      t.setAttribute('fill', textDim)
       t.setAttribute('font-family', "'JetBrains Mono', monospace")
       t.setAttribute('font-size', '12')
       t.textContent = 'Generate a design to see its block diagram'
@@ -71,10 +79,10 @@ export default function DiagramView({ design }) {
     // Module box
     const box = rc.rectangle(boxX, boxY, boxW, boxH, {
       roughness: 1.5,
-      stroke: '#00ff41',
+      stroke: accent,
       strokeWidth: 1.8,
       fillStyle: 'hachure',
-      fill: '#00ff4108',
+      fill: accentFill,
       hachureGap: 8,
     })
     svg.appendChild(box)
@@ -84,7 +92,7 @@ export default function DiagramView({ design }) {
     nameText.setAttribute('x', boxX + boxW / 2)
     nameText.setAttribute('y', boxY + 18)
     nameText.setAttribute('text-anchor', 'middle')
-    nameText.setAttribute('fill', '#00ff41')
+    nameText.setAttribute('fill', accent)
     nameText.setAttribute('font-family', "'JetBrains Mono', monospace")
     nameText.setAttribute('font-size', '13')
     nameText.setAttribute('font-weight', '600')
@@ -100,15 +108,15 @@ export default function DiagramView({ design }) {
       // Wire line
       const line = rc.line(lineX1, y, lineX2, y, {
         roughness: 1,
-        stroke: '#00cc33',
+        stroke: accentSecondary,
         strokeWidth: 1.5,
       })
       svg.appendChild(line)
 
       // Arrow head
-      const arrow = rc.line(lineX2 - 8, y - 4, lineX2, y, { roughness: 0.5, stroke: '#00cc33', strokeWidth: 1.5 })
+      const arrow = rc.line(lineX2 - 8, y - 4, lineX2, y, { roughness: 0.5, stroke: accentSecondary, strokeWidth: 1.5 })
       svg.appendChild(arrow)
-      const arrow2 = rc.line(lineX2 - 8, y + 4, lineX2, y, { roughness: 0.5, stroke: '#00cc33', strokeWidth: 1.5 })
+      const arrow2 = rc.line(lineX2 - 8, y + 4, lineX2, y, { roughness: 0.5, stroke: accentSecondary, strokeWidth: 1.5 })
       svg.appendChild(arrow2)
 
       // Label
@@ -116,7 +124,7 @@ export default function DiagramView({ design }) {
       label.setAttribute('x', lineX1 - 4)
       label.setAttribute('y', y + 4)
       label.setAttribute('text-anchor', 'end')
-      label.setAttribute('fill', '#00cc33')
+      label.setAttribute('fill', accentSecondary)
       label.setAttribute('font-family', "'JetBrains Mono', monospace")
       label.setAttribute('font-size', '10')
       label.textContent = port.label
@@ -132,15 +140,15 @@ export default function DiagramView({ design }) {
       // Wire line
       const line = rc.line(lineX1, y, lineX2, y, {
         roughness: 1,
-        stroke: '#00cc33',
+        stroke: accentSecondary,
         strokeWidth: 1.5,
       })
       svg.appendChild(line)
 
       // Arrow head
-      const arrow = rc.line(lineX2 - 8, y - 4, lineX2, y, { roughness: 0.5, stroke: '#00cc33', strokeWidth: 1.5 })
+      const arrow = rc.line(lineX2 - 8, y - 4, lineX2, y, { roughness: 0.5, stroke: accentSecondary, strokeWidth: 1.5 })
       svg.appendChild(arrow)
-      const arrow2 = rc.line(lineX2 - 8, y + 4, lineX2, y, { roughness: 0.5, stroke: '#00cc33', strokeWidth: 1.5 })
+      const arrow2 = rc.line(lineX2 - 8, y + 4, lineX2, y, { roughness: 0.5, stroke: accentSecondary, strokeWidth: 1.5 })
       svg.appendChild(arrow2)
 
       // Label
@@ -148,13 +156,13 @@ export default function DiagramView({ design }) {
       label.setAttribute('x', lineX2 + 4)
       label.setAttribute('y', y + 4)
       label.setAttribute('text-anchor', 'start')
-      label.setAttribute('fill', '#00cc33')
+      label.setAttribute('fill', accentSecondary)
       label.setAttribute('font-family', "'JetBrains Mono', monospace")
       label.setAttribute('font-size', '10')
       label.textContent = port.label
       svg.appendChild(label)
     })
-  }, [design])
+  }, [design, theme])
 
   return (
     <div style={{
@@ -163,7 +171,7 @@ export default function DiagramView({ design }) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: '#000',
+      background: 'var(--bg-primary)',
     }}>
       <svg
         ref={svgRef}

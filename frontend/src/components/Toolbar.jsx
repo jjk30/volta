@@ -31,6 +31,8 @@ export default function Toolbar({
   projectStatus = '',
   projectSearch = '',
   setProjectSearch = () => {},
+  theme = 'dark',
+  onToggleTheme = () => {},
 }) {
 
   const handleGenerate = () => {
@@ -326,6 +328,9 @@ export default function Toolbar({
         </button>
       )}
 
+      {/* Theme toggle (dark/light pill) */}
+      <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+
       {/* Status */}
       {cancelled && (
         <span style={{ fontSize: '10px', color: '#ff4444', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0 }}>
@@ -343,5 +348,77 @@ export default function Toolbar({
         </span>
       )}
     </div>
+  )
+}
+
+/**
+ * Small pill-shaped dark/light theme toggle. 40x20px track with a sliding
+ * 16x16 thumb. D (dark) on the left, L (light) on the right.
+ */
+function ThemeToggle({ theme, onToggle }) {
+  const isLight = theme === 'light'
+  return (
+    <button
+      onClick={onToggle}
+      aria-label={`Switch to ${isLight ? 'dark' : 'light'} mode`}
+      title={`Switch to ${isLight ? 'dark' : 'light'} mode`}
+      style={{
+        position: 'relative',
+        width: '40px',
+        height: '20px',
+        border: '1px solid var(--accent)',
+        borderRadius: '10px',
+        background: 'transparent',
+        padding: 0,
+        cursor: 'pointer',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        fontFamily: "'JetBrains Mono', monospace",
+        transition: 'background 0.15s',
+      }}
+    >
+      {/* Track labels */}
+      <span style={{
+        position: 'absolute',
+        left: '5px',
+        top: '50%',
+        transform: 'translateY(-50%)',
+        fontSize: '9px',
+        fontWeight: 700,
+        color: isLight ? 'var(--text-dim)' : 'var(--accent)',
+        pointerEvents: 'none',
+        transition: 'color 0.2s',
+        lineHeight: 1,
+      }}>
+        D
+      </span>
+      <span style={{
+        position: 'absolute',
+        right: '5px',
+        top: '50%',
+        transform: 'translateY(-50%)',
+        fontSize: '9px',
+        fontWeight: 700,
+        color: isLight ? 'var(--accent)' : 'var(--text-dim)',
+        pointerEvents: 'none',
+        transition: 'color 0.2s',
+        lineHeight: 1,
+      }}>
+        L
+      </span>
+      {/* Sliding thumb */}
+      <span style={{
+        position: 'absolute',
+        top: '1px',
+        left: isLight ? '21px' : '1px',
+        width: '16px',
+        height: '16px',
+        borderRadius: '50%',
+        background: 'var(--accent)',
+        transition: 'left 0.2s ease',
+        boxShadow: 'var(--accent-glow)',
+      }} />
+    </button>
   )
 }
