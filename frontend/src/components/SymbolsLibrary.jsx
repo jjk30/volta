@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { CATEGORIES, SYMBOLS } from '../symbolsData.js'
 
-export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onClear }) {
+export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onClear, showHeader = true }) {
   const [activeCategory, setActiveCategory] = useState('Logic Gates')
   const [hovered, setHovered] = useState(null)
   const [ttState, setTtState] = useState(null) // { symId, table, x, y } or null
@@ -62,18 +62,20 @@ export default function SymbolsLibrary({ onSelectSymbol, selectedIds = [], onCle
       fontFamily: "'JetBrains Mono', monospace",
     }}>
       {/* Header */}
-      <div style={{
-        padding: '3px 12px',
-        fontSize: '11px',
-        color: 'var(--accent)',
-        fontWeight: 500,
-        background: 'var(--toolbar-bg)',
-        borderBottom: '1px solid var(--border)',
-        letterSpacing: '1px',
-        flexShrink: 0,
-      }}>
-        SYMBOLS LIBRARY
-      </div>
+      {showHeader && (
+        <div style={{
+          padding: '3px 12px',
+          fontSize: '11px',
+          color: 'var(--accent)',
+          fontWeight: 500,
+          background: 'var(--toolbar-bg)',
+          borderBottom: '1px solid var(--border)',
+          letterSpacing: '1px',
+          flexShrink: 0,
+        }}>
+          SYMBOLS LIBRARY
+        </div>
+      )}
 
       {/* Category tabs */}
       <div style={{
