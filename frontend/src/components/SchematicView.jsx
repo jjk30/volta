@@ -903,11 +903,11 @@ const HILITE = 'var(--schematic-highlight)'
 const ERR = 'var(--schematic-error)'
 const MUTED = 'var(--text-dim)'
 
-// Gate symbols are 70 × 45 (per the spec) so they can sit visually inside the
-// 200-wide component column without crowding. External pins are at the same
-// horizontal extent as the gate body so wires terminate cleanly.
-const GATE_W = 70
-const GATE_H = 45
+// Gate symbols are 80 × 55 so they read clearly even with 4+ gates stacked
+// vertically. External pins sit at the bounding-box edges so wires terminate
+// flush against the gate.
+const GATE_W = 80
+const GATE_H = 55
 
 function gatePinLayout(gateType) {
   switch (gateType) {
@@ -918,13 +918,13 @@ function gatePinLayout(gateType) {
         in: [
           { x: -GATE_W / 2, y: -12 },
           { x: -GATE_W / 2, y: 12 },
-          { x: 0, y: GATE_H / 2 + 8 },
+          { x: 0, y: GATE_H / 2 + 10 },
         ],
         out: { x: GATE_W / 2, y: 0 },
       }
     default:
       return {
-        in: [{ x: -GATE_W / 2, y: -10 }, { x: -GATE_W / 2, y: 10 }],
+        in: [{ x: -GATE_W / 2, y: -12 }, { x: -GATE_W / 2, y: 12 }],
         out: { x: GATE_W / 2, y: 0 },
       }
   }
@@ -933,63 +933,65 @@ function gatePinLayout(gateType) {
 function GateGlyph({ type, label, color = ACCENT }) {
   const common = { stroke: color, strokeWidth: 2, fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' }
   const stub = (x1, y1, x2, y2) => <line x1={x1} y1={y1} x2={x2} y2={y2} {...common} />
-  const lx = -GATE_W / 2
-  const rx = GATE_W / 2
+  const lx = -GATE_W / 2     // -40
+  const rx = GATE_W / 2      //  40
+  // All paths use a body height of ~40 (y from -20 to 20), leaving a 7.5px
+  // padding inside the 55-tall bounding box.
 
   switch (type) {
     case 'AND': return <>
-      <path d="M -28 -17 L -10 -17 A 17 17 0 0 1 -10 17 L -28 17 Z" {...common} />
-      {stub(lx, -10, -28, -10)}{stub(lx, 10, -28, 10)}{stub(7, 0, rx, 0)}
+      <path d="M -32 -20 L -10 -20 A 20 20 0 0 1 -10 20 L -32 20 Z" {...common} />
+      {stub(lx, -12, -32, -12)}{stub(lx, 12, -32, 12)}{stub(10, 0, rx, 0)}
     </>
     case 'NAND': return <>
-      <path d="M -28 -17 L -13 -17 A 17 17 0 0 1 -13 17 L -28 17 Z" {...common} />
+      <path d="M -32 -20 L -13 -20 A 20 20 0 0 1 -13 20 L -32 20 Z" {...common} />
       <circle cx="11" cy="0" r="4" {...common} />
-      {stub(lx, -10, -28, -10)}{stub(lx, 10, -28, 10)}{stub(15, 0, rx, 0)}
+      {stub(lx, -12, -32, -12)}{stub(lx, 12, -32, 12)}{stub(15, 0, rx, 0)}
     </>
     case 'OR': return <>
-      <path d="M -28 -17 Q -8 0 -28 17 Q -3 17 18 0 Q -3 -17 -28 -17 Z" {...common} />
-      {stub(lx, -10, -22, -10)}{stub(lx, 10, -22, 10)}{stub(18, 0, rx, 0)}
+      <path d="M -32 -20 Q -8 0 -32 20 Q -3 20 22 0 Q -3 -20 -32 -20 Z" {...common} />
+      {stub(lx, -12, -25, -12)}{stub(lx, 12, -25, 12)}{stub(22, 0, rx, 0)}
     </>
     case 'NOR': return <>
-      <path d="M -28 -17 Q -8 0 -28 17 Q -3 17 14 0 Q -3 -17 -28 -17 Z" {...common} />
-      <circle cx="18" cy="0" r="4" {...common} />
-      {stub(lx, -10, -22, -10)}{stub(lx, 10, -22, 10)}{stub(22, 0, rx, 0)}
+      <path d="M -32 -20 Q -8 0 -32 20 Q -3 20 18 0 Q -3 -20 -32 -20 Z" {...common} />
+      <circle cx="22" cy="0" r="4" {...common} />
+      {stub(lx, -12, -25, -12)}{stub(lx, 12, -25, 12)}{stub(26, 0, rx, 0)}
     </>
     case 'XOR': return <>
-      <path d="M -32 -17 Q -12 0 -32 17" {...common} />
-      <path d="M -27 -17 Q -7 0 -27 17 Q -2 17 18 0 Q -2 -17 -27 -17 Z" {...common} />
-      {stub(lx, -10, -22, -10)}{stub(lx, 10, -22, 10)}{stub(18, 0, rx, 0)}
+      <path d="M -38 -20 Q -14 0 -38 20" {...common} />
+      <path d="M -33 -20 Q -9 0 -33 20 Q -4 20 22 0 Q -4 -20 -33 -20 Z" {...common} />
+      {stub(lx, -12, -26, -12)}{stub(lx, 12, -26, 12)}{stub(22, 0, rx, 0)}
     </>
     case 'XNOR': return <>
-      <path d="M -32 -17 Q -12 0 -32 17" {...common} />
-      <path d="M -27 -17 Q -7 0 -27 17 Q -2 17 14 0 Q -2 -17 -27 -17 Z" {...common} />
-      <circle cx="18" cy="0" r="4" {...common} />
-      {stub(lx, -10, -22, -10)}{stub(lx, 10, -22, 10)}{stub(22, 0, rx, 0)}
+      <path d="M -38 -20 Q -14 0 -38 20" {...common} />
+      <path d="M -33 -20 Q -9 0 -33 20 Q -4 20 18 0 Q -4 -20 -33 -20 Z" {...common} />
+      <circle cx="22" cy="0" r="4" {...common} />
+      {stub(lx, -12, -26, -12)}{stub(lx, 12, -26, 12)}{stub(26, 0, rx, 0)}
     </>
     case 'NOT': return <>
-      <polygon points="-25,-17 12,0 -25,17" {...common} />
-      <circle cx="16" cy="0" r="4" {...common} />
-      {stub(lx, 0, -25, 0)}{stub(20, 0, rx, 0)}
+      <polygon points="-30,-20 18,0 -30,20" {...common} />
+      <circle cx="22" cy="0" r="4" {...common} />
+      {stub(lx, 0, -30, 0)}{stub(26, 0, rx, 0)}
     </>
     case 'MUX': return <>
-      <polygon points="-24,-20 22,-12 22,12 -24,20" {...common} />
-      <text x="0" y="4" textAnchor="middle" fill={color}
-        fontSize="10" fontWeight="600" fontFamily="'JetBrains Mono',monospace">MUX</text>
-      <text x="-19" y="-8" textAnchor="start" fill={color}
+      <polygon points="-25,-22 22,-13 22,13 -25,22" {...common} />
+      <text x="-2" y="4" textAnchor="middle" fill={color}
+        fontSize="11" fontWeight="600" fontFamily="'JetBrains Mono',monospace">MUX</text>
+      <text x="-21" y="-8" textAnchor="start" fill={color}
         fontSize="8" fontFamily="'JetBrains Mono',monospace">0</text>
-      <text x="-19" y="16" textAnchor="start" fill={color}
+      <text x="-21" y="17" textAnchor="start" fill={color}
         fontSize="8" fontFamily="'JetBrains Mono',monospace">1</text>
-      <text x="0" y={GATE_H / 2 + 14} textAnchor="middle" fill={color}
-        fontSize="8" fontFamily="'JetBrains Mono',monospace">sel</text>
-      {stub(lx, -12, -24, -12)}{stub(lx, 12, -24, 12)}
-      {stub(0, GATE_H / 2 + 8, 0, 20)}{stub(22, 0, rx, 0)}
+      <text x="0" y={GATE_H / 2 + 16} textAnchor="middle" fill={color}
+        fontSize="9" fontFamily="'JetBrains Mono',monospace">sel</text>
+      {stub(lx, -12, -25, -12)}{stub(lx, 12, -25, 12)}
+      {stub(0, GATE_H / 2 + 10, 0, 22)}{stub(22, 0, rx, 0)}
     </>
     default: return (
       <>
-        <rect x="-28" y="-17" width="56" height="34" rx="3" {...common} />
-        <text x="0" y="4" textAnchor="middle" fill={color}
-          fontSize="10" fontWeight="600" fontFamily="'JetBrains Mono',monospace">{label || type}</text>
-        {stub(lx, -10, -28, -10)}{stub(lx, 10, -28, 10)}{stub(28, 0, rx, 0)}
+        <rect x="-32" y="-20" width="64" height="40" rx="4" {...common} />
+        <text x="0" y="5" textAnchor="middle" fill={color}
+          fontSize="11" fontWeight="600" fontFamily="'JetBrains Mono',monospace">{label || type}</text>
+        {stub(lx, -12, -32, -12)}{stub(lx, 12, -32, 12)}{stub(32, 0, rx, 0)}
       </>
     )
   }
@@ -1001,10 +1003,40 @@ const BLOCK_W = 200
 
 function functionalBlockHeight(inputs, outputs, hasOps) {
   const portCount = Math.max(inputs.length, outputs.length, 1)
-  const portSpacing = portCount > 6 ? 30 : 40
-  const headerHeight = 30 + (hasOps ? 22 : 0)   // title + optional ops row
-  const bottomPad = 15
+  // Spacing per the schematic spec: 35px between port labels for blocks,
+  // dropping to 28px when more than 6 ports per side.
+  const portSpacing = portCount > 6 ? 28 : 35
+  const headerHeight = 35 + (hasOps ? 24 : 0)   // title + optional ops row
+  const bottomPad = 20
   return Math.max(150, headerHeight + portCount * portSpacing + bottomPad)
+}
+
+/** Build an SVG path with rounded 90° corners from a list of axis-aligned
+ *  polyline points. Each interior corner becomes a quadratic-Bézier with the
+ *  given radius. Falls back to a straight line for 2-point inputs. */
+function roundedPath(points, radius = 3) {
+  if (!points || points.length === 0) return ''
+  if (points.length === 1) return `M ${points[0][0]} ${points[0][1]}`
+  if (points.length === 2) {
+    return `M ${points[0][0]} ${points[0][1]} L ${points[1][0]} ${points[1][1]}`
+  }
+  let d = `M ${points[0][0]} ${points[0][1]}`
+  for (let i = 1; i < points.length - 1; i++) {
+    const [px, py] = points[i - 1]
+    const [cx, cy] = points[i]
+    const [nx, ny] = points[i + 1]
+    const inLen = Math.hypot(cx - px, cy - py) || 1
+    const outLen = Math.hypot(nx - cx, ny - cy) || 1
+    const r = Math.min(radius, inLen / 2, outLen / 2)
+    const ex = cx - ((cx - px) * r) / inLen
+    const ey = cy - ((cy - py) * r) / inLen
+    const sx = cx + ((nx - cx) * r) / outLen
+    const sy = cy + ((ny - cy) * r) / outLen
+    d += ` L ${ex} ${ey} Q ${cx} ${cy} ${sx} ${sy}`
+  }
+  const last = points[points.length - 1]
+  d += ` L ${last[0]} ${last[1]}`
+  return d
 }
 
 /** Generic rounded-rect functional block used by every non-gate component.
@@ -1496,17 +1528,20 @@ function FlatView({
   )
 
   // Layout columns (per the spec):
-  //   - Input dots + labels at x=50 (labels right-aligned, ending at x=45)
-  //   - Component centres at x=350 (200-wide block → left edge x=250, right
-  //     edge x=450; gates centred at the same x sit comfortably inside)
-  //   - Output dots + labels at x=700 (labels left-aligned, starting at x=710)
-  //   - Total SVG width: 850 + 30 padding on each side = 910
-  const COL_INPUT_X = 50
-  const COL_INPUT_LABEL_X = 45
-  const COMP_CENTER_X = 350
-  const COL_OUTPUT_X = 700
-  const COL_OUTPUT_LABEL_X = 710
-  const TOP_PAD = 50
+  //   - Input dots at x=60, labels right-aligned ending at x=55
+  //   - Vertical input trunk at x=150 (per-signal trunks staggered 10px apart
+  //     starting from there, so each signal's branch is visually distinct)
+  //   - Component centres at x=400 (200-wide block → left edge x=300, right
+  //     edge x=500; gates centred at the same x)
+  //   - Output dots at x=750, labels left-aligned starting at x=760
+  //   - SVG inner area is 900 wide, with 40px padding on each side (980 total)
+  const COL_INPUT_X = 60
+  const COL_INPUT_LABEL_X = 55
+  const TRUNK_BASE_X = 150
+  const COMP_CENTER_X = 400
+  const COL_OUTPUT_X = 750
+  const COL_OUTPUT_LABEL_X = 760
+  const TOP_PAD = 60
 
   // Build a port-width lookup so external labels can show "a [3:0]" instead
   // of just "a". Clocks and resets stay as bare names.
@@ -1526,10 +1561,16 @@ function FlatView({
     render: renderComponent(c, { hasError: hasErrors }),
   }))
 
-  // Component vertical spacing — guarantee at least 30px clearance between
-  // adjacent components, and at least 50px for gates so 4+ gates don't crowd.
+  // Component vertical spacing — gates need much more room than blocks:
+  // 80px between bounding boxes for gates (~100px centre-to-centre at 55h),
+  // and 60px for blocks. The formula `maxH + 80` gives the centre-to-centre
+  // distance so the visible gap between adjacent components is at least
+  // `(maxH + 80) - maxH = 80`, satisfying the spec.
   const maxH = Math.max(60, ...rendered.map(r => r.render.h || 60))
-  const vSpacing = Math.max(maxH + 30, 50)
+  const isGateOnly = rendered.every(r => r.render.gateType)
+  const vSpacing = isGateOnly
+    ? Math.max(maxH + 80, 100)        // gate-only schematic: 80px gap minimum
+    : Math.max(maxH + 60, 100)        // mixed/blocks: 60px gap minimum
 
   // Position each component vertically along the centre column
   const layout = rendered.map((r, i) => ({
@@ -1575,16 +1616,17 @@ function FlatView({
     }
   })
 
-  // Vertical spacing for primary inputs — 40px default, 30px when crowded
-  // (more than 6 inputs), but never less.
-  const inSpacing = primaryInputs.length > 6 ? 30 : 40
+  // Vertical spacing for primary inputs — 50px default, 35px when crowded
+  // (more than 6 inputs), but never less. Larger spacing keeps the input
+  // labels distinct so they never overlap.
+  const inSpacing = primaryInputs.length > 6 ? 35 : 50
   const inputColumnHeight = Math.max(0, (primaryInputs.length - 1) * inSpacing)
 
   // Compute SVG size before placing inputs so we can centre them vertically.
   const componentColumnHeight = layout.length * vSpacing
   const innerHeight = Math.max(componentColumnHeight, inputColumnHeight + 80)
   const svgHeight = TOP_PAD + innerHeight + TOP_PAD
-  const svgWidth = 850
+  const svgWidth = 900
 
   const inputColumnTop = TOP_PAD + (innerHeight - inputColumnHeight) / 2
   const inputPositions = primaryInputs.map((sig, i) => ({
@@ -1618,57 +1660,40 @@ function FlatView({
     }
   })
 
-  // Trunk x positions are staggered so multiple inputs don't share a column.
+  // Each primary input gets its OWN trunk column so parallel branch wires
+  // never overlap. Trunks start at x=150 and are staggered 10px apart per
+  // signal — for 6 inputs that's columns at 150, 160, 170, 180, 190, 200,
+  // which still leaves a generous gap to the components (centred at x=400).
   let trunkOffset = 0
   for (const [sig, consumers] of consumersByInput) {
     const src = inputByName.get(sig)
-    const trunkX = COL_INPUT_X + 40 + (trunkOffset % 8) * 8
+    const trunkX = TRUNK_BASE_X + trunkOffset * 10
     trunkOffset++
 
     // Sort consumers top-to-bottom so the trunk doesn't double back
     consumers.sort((a, b) => a.absY - b.absY)
 
-    // 1. Stub from the input dot rightward to the trunk
-    wires.push({
-      points: [[src.x + 4, src.y], [trunkX, src.y]],
-      signal: sig, sourceKind: 'primary-stub',
-    })
-
-    // 2. Trunk vertical from the source Y to span all consumer Ys
-    const minY = Math.min(src.y, ...consumers.map(c => c.absY))
-    const maxY = Math.max(src.y, ...consumers.map(c => c.absY))
-    if (minY !== maxY) {
-      wires.push({
-        points: [[trunkX, minY], [trunkX, maxY]],
-        signal: sig, sourceKind: 'primary-trunk',
-      })
+    // 1. Per-consumer L-shape: stub from the input dot to its dedicated
+    //    trunk column, then a vertical run to the consumer Y, then a
+    //    horizontal branch to the pin. Combining all three legs into a
+    //    single rounded path makes corners blend smoothly.
+    for (const c of consumers) {
+      const points = [
+        [src.x + 4, src.y],
+        [trunkX, src.y],
+        [trunkX, c.absY],
+        [c.absX, c.absY],
+      ]
+      wires.push({ points, signal: sig, sourceKind: 'primary' })
     }
 
-    // 3. Horizontal branch from trunk to each consumer pin
-    for (const c of consumers) {
-      if (c.side === 'bottom') {
-        // Pin enters from the bottom — drop down to one level below the pin,
-        // then horizontal to the pin's X, then up to the pin.
-        const dropY = c.absY + 20
-        wires.push({
-          points: [[trunkX, c.absY], [c.absX, c.absY]],
-          signal: sig, sourceKind: 'primary-branch',
-        })
-        // Note: for bottom pins, c.absY is the pin's bottom point; we still
-        // route horizontally to its column then drop; the calling glyph
-        // already draws the stub up to the box from there.
-        // Add a junction dot at the trunk-branch intersection.
+    // 2. Junction dots where multiple consumers branch off the same trunk
+    if (consumers.length >= 2) {
+      for (const c of consumers) {
         junctions.push({ x: trunkX, y: c.absY })
-      } else {
-        wires.push({
-          points: [[trunkX, c.absY], [c.absX, c.absY]],
-          signal: sig, sourceKind: 'primary-branch',
-        })
-        // Junction at the trunk if there are multiple consumers
-        if (consumers.length >= 2) {
-          junctions.push({ x: trunkX, y: c.absY })
-        }
       }
+      // Also a dot at the input-end of the trunk so the tee is visible
+      junctions.push({ x: trunkX, y: src.y })
     }
   }
 
@@ -1741,15 +1766,17 @@ function FlatView({
             )
           })}
 
-          {/* Wires */}
+          {/* Wires — rendered as rounded-corner SVG paths so 90° bends look
+              soft rather than sharp. */}
           {wires.map((w, i) => {
             const isHot = hoveredSignal && w.signal === hoveredSignal
             const color = hasErrors ? ERR : (isHot ? HILITE : WIRE)
             return (
-              <polyline
+              <path
                 key={`w-${i}`}
-                points={w.points.map(pp => pp.join(',')).join(' ')}
+                d={roundedPath(w.points, 3)}
                 stroke={color} strokeWidth={isHot ? 2 : 1.5} fill="none"
+                strokeLinecap="round" strokeLinejoin="round"
                 onMouseEnter={() => setHoveredSignal(w.signal)}
                 onMouseLeave={() => setHoveredSignal(null)}
                 style={{ cursor: 'pointer', transition: 'stroke 0.12s' }}
@@ -1757,9 +1784,9 @@ function FlatView({
             )
           })}
 
-          {/* Junction dots — 4px filled circles where wires branch */}
+          {/* Junction dots — 5px filled circles for clear branch visibility */}
           {junctions.map((j, i) => (
-            <circle key={`j-${i}`} cx={j.x} cy={j.y} r="3" fill={WIRE} />
+            <circle key={`j-${i}`} cx={j.x} cy={j.y} r="5" fill={WIRE} />
           ))}
 
           {/* Components */}
@@ -1821,13 +1848,13 @@ function FlatView({
             )
           })}
 
-          {/* Gate-style components get a small name label below the symbol so
-              users can tell AND vs OR at a glance, per the spec. */}
+          {/* Gate-style components get a name label centred below the symbol
+              with an 8px gap, 10px font (per the spec). */}
           {layout.filter(r => r.render.gateType).map((r) => (
             <text key={`gname-${r.index}`}
-              x={r.cx} y={r.cy + GATE_H / 2 + 22}
+              x={r.cx} y={r.cy + GATE_H / 2 + 18}
               textAnchor="middle" fill="var(--accent-secondary)"
-              fontSize="9" opacity="0.85"
+              fontSize="10" opacity="0.9"
               fontFamily="'JetBrains Mono', monospace">
               {r.render.gateType}
             </text>
