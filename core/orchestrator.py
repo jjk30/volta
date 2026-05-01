@@ -137,8 +137,124 @@ def _fix_verilog(verilog: str) -> str:
     code = _fix_undeclared_regs(code)
     code = _fix_undeclared_inputs(code)
     code = _fix_input_assignments(code)
+    code = _fix_carry_logic(code)
     code = _strip_systemverilog(code)
     return code
+
+
+def _fix_carry_logic(verilog: str) -> str:
+    """Repair common LLM mistakes around carry / overflow detection.
+
+    The LLM frequently writes lines like
+
+        carry_out <= (a + b) > 4'd15;     // always 0 — natural truncation
+        carry_out <= (a - b) < 4'd0;      // always 0 — unsigned compare
+
+    Neither line ever fires for a 4-bit unsigned add/sub, so the testbench
+    runs but the carry / borrow signal is stuck at zero. This pass detects
+    the patterns and rewrites them to a properly typed equivalent:
+
+        Overflow detection
+            if a sibling line `<r> = a + b;` (or `<= a + b;`) exists in the
+            same begin/end block, fuse both into
+                {<carry>, <r>} <= a + b;
+            otherwise replace with the canonical one-line trick
+                <carry> <= ((<a> + <b>) < <a>);
+            which is true exactly when the unsigned addition wrapped.
+
+        Underflow / borrow detection
+            <carry> <= (<a> < <b>);
+            which is the standard unsigned-borrow predicate.
+
+    The fix is conservative — it only rewrites lines that exactly match the
+    broken patterns. Any other usage of `carry_out` is left alone.
+    """
+
+    # Capture the indent and an optional case-prefix ("2'b00: ", "default: ")
+    # so we can preserve them when rewriting the line.
+    case_prefix = r"(?P<prefix>(?:\d+'[bdhBDH][0-9a-fA-FxXzZ_]+|default|\w+)\s*:\s*)?"
+
+    overflow_re = re.compile(
+        r'^(?P<indent>\s*)' + case_prefix +
+        r'(?P<carry>\w+)\s*(?P<op><=|=)\s*'
+        r'\(\s*(?P<a>\w+)\s*\+\s*(?P<b>\w+)\s*\)\s*>\s*'
+        r"(?P<width>\d+)'[dD](?P<value>\d+)\s*;\s*$"
+    )
+
+    underflow_re = re.compile(
+        r'^(?P<indent>\s*)' + case_prefix +
+        r'(?P<carry>\w+)\s*(?P<op><=|=)\s*'
+        r'\(\s*(?P<a>\w+)\s*-\s*(?P<b>\w+)\s*\)\s*<\s*'
+        r"(?:\d+'[dD])?0\s*;\s*$"
+    )
+
+    def is_max_for_width(width: str, value: str) -> bool:
+        try:
+            w = int(width)
+            v = int(value)
+        except ValueError:
+            return False
+        return w > 0 and v == (1 << w) - 1
+
+    lines = verilog.split('\n')
+    drop_indices = set()
+    out_lines = list(lines)
+
+    for i, line in enumerate(lines):
+        if i in drop_indices:
+            continue
+
+        # ---- Overflow pattern (carry <= (a + b) > <max>) ----
+        m = overflow_re.match(line)
+        if m and is_max_for_width(m.group('width'), m.group('value')):
+            indent = m.group('indent')
+            prefix = m.group('prefix') or ''
+            carry = m.group('carry')
+            op = m.group('op')
+            a = m.group('a')
+            b = m.group('b')
+
+            # Look for a sibling `<result> = a + b;` (blocking or non-blocking)
+            # nearby — typically the line immediately before the carry line —
+            # so we can fuse them into a single concatenation assignment.
+            dup_re = re.compile(
+                rf'^\s*(?:(?:\d+\'[bdhBDH][0-9a-fA-FxXzZ_]+|default|\w+)\s*:\s*)?'
+                rf'(\w+)\s*(?:<=|=)\s*{re.escape(a)}\s*\+\s*{re.escape(b)}\s*;\s*$'
+            )
+            duplicate_idx = None
+            duplicate_name = None
+            for j in range(max(0, i - 4), min(len(lines), i + 5)):
+                if j == i:
+                    continue
+                dm = dup_re.match(lines[j])
+                if dm and dm.group(1) != carry:
+                    duplicate_idx = j
+                    duplicate_name = dm.group(1)
+                    break
+
+            if duplicate_idx is not None and duplicate_name:
+                out_lines[i] = f'{indent}{prefix}{{{carry}, {duplicate_name}}} {op} {a} + {b};'
+                drop_indices.add(duplicate_idx)
+            else:
+                out_lines[i] = f'{indent}{prefix}{carry} {op} (({a} + {b}) < {a});'
+            continue
+
+        # ---- Underflow / borrow pattern (carry <= (a - b) < 0) ----
+        m = underflow_re.match(line)
+        if m:
+            indent = m.group('indent')
+            prefix = m.group('prefix') or ''
+            carry = m.group('carry')
+            op = m.group('op')
+            a = m.group('a')
+            b = m.group('b')
+            out_lines[i] = f'{indent}{prefix}{carry} {op} ({a} < {b});'
+            continue
+
+    if not drop_indices:
+        return '\n'.join(out_lines)
+
+    return '\n'.join(l for k, l in enumerate(out_lines) if k not in drop_indices)
 
 
 def _fix_reg_declarations(verilog: str) -> str:
