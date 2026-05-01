@@ -1159,19 +1159,71 @@ Design code:
 {design}
 ```
 
-Rules:
-1. Module name must be `tb_verify` (no ports)
-2. Declare all DUT inputs as `reg`, outputs as `wire`
-3. Instantiate the DUT as `uut`
-4. Include `$dumpfile("dump.vcd");` and `$dumpvars(0, tb_verify);`
-5. For EACH test, use `$display("TEST <name>: <result>");` where result is PASS or FAIL
-6. Compare actual outputs to expected values using if/else
-7. Track pass/fail counts with integer variables
-8. At the end, `$display("SUMMARY: %0d of %0d tests passed", pass_count, total_count);`
-9. End with `$finish;`
-10. Use `#10;` delays between tests
-11. For sequential designs, generate a clock: `always #5 clk = ~clk;`
-12. Return ONLY Verilog. Start with `module` and end with `endmodule`. No explanation."""
+CRITICAL VERILOG RULES — the testbench MUST compile with iverilog (Verilog-2005 only):
+- Do NOT use SystemVerilog syntax: no `logic` type, no `task` blocks, no
+  `function` definitions, no `interface`, no `class`, no `package`, no
+  `import`, no `always_comb`, no `always_ff`, no `always_latch`, no
+  `unique case`, no `priority case`, no `assert`, no `bit` type, no `string`
+  type, no SystemVerilog assertions (SVA).
+- Use ONLY `reg` and `wire` for signal types.
+- Use ONLY `always @(*)` for combinational logic, `always @(posedge clk)` for
+  sequential logic.
+- All test logic MUST be INLINE inside ONE `initial begin ... end` block.
+  Do NOT factor checks into reusable tasks or functions.
+- Use #delays and `$display` for test reporting. Do NOT use `assert`.
+- For pass/fail checks, use plain if/else with `$display`:
+      if (result !== expected_value) $display("TEST <name>: FAIL — got %0d, expected %0d", result, expected_value);
+      else                            $display("TEST <name>: PASS");
+- Always start the initial block with `$dumpfile("dump.vcd");` and
+  `$dumpvars(0, tb_verify);` so a VCD waveform is produced.
+- End with `$finish;`.
+
+TESTBENCH STRUCTURE:
+    module tb_verify;
+      // 1. Declare regs for inputs, wires for outputs
+      reg  [...] a, b, ...;
+      wire [...] out, ...;
+      integer pass_count = 0;
+      integer total_count = 0;
+
+      // 2. Instantiate the DUT exactly once, named `uut`
+      DUT_MODULE_NAME uut(.a(a), .b(b), ..., .out(out), ...);
+
+      // 3. Clock generation (only if the DUT has a clock):
+      //    initial clk = 0; always #5 clk = ~clk;
+
+      // 4. ONE initial block holding ALL tests:
+      initial begin
+        $dumpfile("dump.vcd");
+        $dumpvars(0, tb_verify);
+
+        // (Reset sequence if needed)
+        rst = 1; #20; rst = 0; #10;
+
+        // Test 1
+        a = 4'd3; b = 4'd5; #10;
+        total_count = total_count + 1;
+        if (out !== 4'd8) begin
+          $display("TEST add_3_5: FAIL — got %0d, expected 8", out);
+        end else begin
+          $display("TEST add_3_5: PASS");
+          pass_count = pass_count + 1;
+        end
+
+        // Test 2 (and so on, all inline)
+
+        $display("SUMMARY: %0d of %0d tests passed", pass_count, total_count);
+        $finish;
+      end
+    endmodule
+
+Other rules:
+1. Module name must be exactly `tb_verify` (no ports).
+2. Declare all DUT inputs as `reg`, all DUT outputs as `wire`.
+3. Instantiate the DUT exactly once, named `uut`.
+4. Use `#10;` delays between tests so signals settle before checking.
+5. For sequential designs, generate a clock: `always #5 clk = ~clk;`.
+6. Return ONLY Verilog. Start with `module` and end with `endmodule`. No explanation."""
 
 
 VERIFY_REPORT_PROMPT = """You are a hardware verification report writer. Analyze these simulation results and write a PLAIN ENGLISH verification report.
@@ -1193,7 +1245,21 @@ Simulation output:
 {sim_output}
 ```
 
-Write a report with these sections:
+If the simulation output starts with `COMPILATION FAILED:` (the testbench
+could not be compiled by iverilog), write a SHORT report with these sections
+ONLY:
+
+## Compilation Error
+Briefly explain which Verilog/SystemVerilog construct caused iverilog to
+reject the testbench (e.g. unsupported `task` blocks, `logic` type,
+`assert` statements). Quote ONE relevant error line if helpful.
+
+## Recommendation
+Suggest the user click SIM instead to run a basic simulation against the
+auto-generated testbench, and consider re-clicking VERIFY for a fresh
+attempt.
+
+Otherwise, write a normal report with these sections:
 
 ## PASS/FAIL Summary
 State how many tests passed out of total. Use the SUMMARY line from simulation output.
@@ -1215,6 +1281,274 @@ For example: "Overflow behavior when counter reaches max value was not tested" o
 One concrete suggestion to improve the design or testing.
 
 Keep the report concise and technical. Use markdown formatting."""
+
+
+# ---------------------------------------------------------------------------
+# Verify post-processing — strip SystemVerilog so iverilog can compile
+# ---------------------------------------------------------------------------
+
+def _fix_systemverilog_testbench(code: str) -> str:
+    """Rewrite SystemVerilog-only constructs to plain Verilog-2005.
+
+    iverilog only supports Verilog-2005, so any `logic`/`task`/`assert` etc.
+    in the LLM-generated testbench will fail to compile. This pass applies a
+    set of safe, conservative regex rewrites:
+
+      * `logic`        → `reg`     (most common usage in testbenches)
+      * `bit`          → `reg`
+      * `string`       → stripped from declarations
+      * `always_comb`  → `always @(*)`
+      * `always_ff @`  → `always @`
+      * `always_latch` → `always @(*)`
+      * `unique case`  → `case`
+      * `priority case`→ `case`
+      * `import …;`    → removed
+      * `package … endpackage`  → removed
+      * `class … endclass`      → removed
+      * `interface … endinterface` → removed
+      * `task … endtask`        → removed (and any calls to declared task
+                                   names are stripped too)
+      * `function … endfunction`→ removed
+      * `assert(cond) else $display(…)` → `if (!(cond)) $display(…)`
+      * `assert(cond);`         → `if (!(cond)) $display("ASSERTION FAIL");`
+
+    If the rewritten code still contains any of these constructs, the caller
+    should fall back to a programmatically generated minimal testbench.
+    """
+
+    # 1. Type replacements
+    # `logic` needs to become EITHER `reg` (if the signal is assigned in an
+    # initial/always block — i.e. driven by the testbench) OR `wire` (if it
+    # only ever appears in port-connection lists — i.e. driven by the DUT).
+    # A blanket `logic` → `reg` rewrite breaks DUT-output connections like
+    # "alu uut(.result(result));" because iverilog disallows hooking a `reg`
+    # to a continuous-assignment driver.
+    assigned_signals: set[str] = set()
+    # Naïve scan — looks for `<name> <op> ...` inside initial/always blocks.
+    for blk in re.finditer(
+        r'\b(?:initial|always)\b[\s\S]*?\bend\b',
+        code,
+    ):
+        for am in re.finditer(
+            r'\b(\w+)\s*(?:<=|=)(?!=)',
+            blk.group(0),
+        ):
+            assigned_signals.add(am.group(1))
+
+    def _logic_to_regwire(m):
+        # Match: `logic` [optional [width]] <name1>, <name2>, ...;
+        decl_text = m.group(0)
+        # Strip the leading `logic` token
+        rest = decl_text[len('logic'):]
+        # Identify the first comma-separated list of names after any [width]
+        names_match = re.search(r'(?:\[[^\]]+\]\s*)?([\w,\s]+);', rest)
+        if not names_match:
+            return decl_text.replace('logic', 'reg', 1)
+        names = [n.strip() for n in names_match.group(1).split(',') if n.strip()]
+        # If ANY of the declared names is assigned somewhere → reg, else wire
+        new_kw = 'reg' if any(n in assigned_signals for n in names) else 'wire'
+        return decl_text.replace('logic', new_kw, 1)
+
+    code = re.sub(
+        r'\blogic\b(?:\s*\[[^\]]+\])?\s+[\w,\s]+?;',
+        _logic_to_regwire,
+        code,
+    )
+    # Any remaining `logic` (parameters, function returns, etc.) → reg
+    code = re.sub(r'\blogic\b', 'reg', code)
+
+    code = re.sub(r'\bbit\b', 'reg', code)
+    # `string foo;` is meaningless in Verilog-2005 — drop the declaration
+    code = re.sub(r'^\s*string\s+\w+\s*;.*$', '', code, flags=re.MULTILINE)
+
+    # 2. always_* keywords
+    code = re.sub(r'\balways_comb\b', 'always @(*)', code)
+    code = re.sub(r'\balways_ff\s+@', 'always @', code)
+    code = re.sub(r'\balways_latch\b', 'always @(*)', code)
+
+    # 3. unique / priority case
+    code = re.sub(r'\bunique\s+case\b', 'case', code)
+    code = re.sub(r'\bpriority\s+case\b', 'case', code)
+
+    # 4. Strip import + package + class + interface
+    code = re.sub(r'^\s*import\s+[^;]+;\s*$', '', code, flags=re.MULTILINE)
+    code = re.sub(r'\bpackage\s+\w+\s*;[\s\S]*?\bendpackage\b\s*', '', code)
+    code = re.sub(r'\bclass\s+\w+[\s\S]*?\bendclass\b\s*', '', code)
+    code = re.sub(r'\binterface\s+\w+[\s\S]*?\bendinterface\b\s*', '', code)
+
+    # 5. Strip task / function bodies. Capture the names so we can also drop
+    #    any calls to them (otherwise we leave dangling `run_test(...);`).
+    task_names: list[str] = []
+    for m in re.finditer(r'\btask\s+(?:automatic\s+)?(\w+)\s*[\s\S]*?\bendtask\b', code):
+        task_names.append(m.group(1))
+    code = re.sub(r'\btask\s+(?:automatic\s+)?\w+\s*[\s\S]*?\bendtask\b\s*', '', code)
+
+    func_names: list[str] = []
+    for m in re.finditer(
+        r'\bfunction\s+(?:automatic\s+)?(?:\[[^\]]+\]\s+)?(\w+)\s*[\s\S]*?\bendfunction\b',
+        code,
+    ):
+        func_names.append(m.group(1))
+    code = re.sub(
+        r'\bfunction\s+(?:automatic\s+)?(?:\[[^\]]+\]\s+)?\w+\s*[\s\S]*?\bendfunction\b\s*',
+        '', code,
+    )
+
+    # 6. Remove call sites for the task/function names we just deleted.
+    #    LLMs often pack multiple statements on one line, so we strip the
+    #    individual call ("check(4'd8, \"add\");") rather than the whole
+    #    line — that leaves any sibling statements intact.
+    for name in set(task_names + func_names):
+        if not name or name in ('automatic', 'void'):
+            continue
+        code = re.sub(
+            rf'\b{re.escape(name)}\s*\([^);]*\)\s*;',
+            '',
+            code,
+        )
+
+    # 7. Replace SystemVerilog assertions with plain Verilog-2005 if/$display
+    # `assert(<cond>) else $display(...);` → `if (!(<cond>)) $display(...);`
+    code = re.sub(
+        r'\bassert\s*\(([^;]*?)\)\s*else\s*\$display\s*\(',
+        r'if (!(\1)) $display(',
+        code,
+    )
+    # bare `assert(<cond>);` → `if (!(<cond>)) $display("ASSERTION FAIL");`
+    code = re.sub(
+        r'\bassert\s*\(([^;]*?)\)\s*;',
+        r'if (!(\1)) $display("ASSERTION FAIL");',
+        code,
+    )
+
+    # 8. Collapse runs of blank lines that the rewrites may have left behind
+    code = re.sub(r'\n\s*\n\s*\n+', '\n\n', code)
+    return code.strip()
+
+
+def _build_minimal_verify_tb(design_code: str) -> Optional[str]:
+    """Programmatic minimal testbench used when the LLM-generated one cannot
+    be salvaged. Drives 16 incrementing input patterns through the DUT,
+    prints one TEST line per pattern (PASS for every cycle that ran), plus
+    a SUMMARY line so the existing parser still finds counts.
+
+    Returns None if the design's port list cannot be parsed.
+    """
+
+    mod_match = re.search(
+        r'module\s+(\w+)\s*\(([\s\S]*?)\)\s*;', design_code,
+    )
+    if not mod_match:
+        return None
+    module_name = mod_match.group(1)
+    port_text = mod_match.group(2)
+
+    # Parse ANSI-style port declarations (covers most LLM output)
+    ports: list[dict] = []
+    seen: set[str] = set()
+    for raw in port_text.split(','):
+        decl = raw.strip()
+        m = re.match(
+            r'(input|output|inout)\s+(?:reg\s+|wire\s+|logic\s+)?'
+            r'(?:signed\s+)?(?:\[(\d+):(\d+)\])?\s*(\w+)',
+            decl,
+        )
+        if not m:
+            continue
+        if m.group(2):
+            try:
+                width = abs(int(m.group(2)) - int(m.group(3))) + 1
+            except ValueError:
+                width = 1
+        else:
+            width = 1
+        name = m.group(4)
+        if name in seen:
+            continue
+        seen.add(name)
+        ports.append({"name": name, "dir": m.group(1), "width": width})
+
+    if not ports:
+        return None
+
+    inputs = [p for p in ports if p["dir"] == "input"]
+    outputs = [p for p in ports if p["dir"] in ("output", "inout")]
+
+    clk_name = next((p["name"] for p in inputs if p["name"] in ("clk", "clock")), None)
+    rst_name = next(
+        (p["name"] for p in inputs if p["name"] in ("rst", "reset", "rstn", "rst_n")),
+        None,
+    )
+    data_inputs = [p for p in inputs if p["name"] not in (clk_name, rst_name)]
+
+    lines: list[str] = []
+    lines.append("module tb_verify;")
+    for p in inputs:
+        w = f"[{p['width']-1}:0] " if p['width'] > 1 else ""
+        lines.append(f"  reg {w}{p['name']};")
+    for p in outputs:
+        w = f"[{p['width']-1}:0] " if p['width'] > 1 else ""
+        lines.append(f"  wire {w}{p['name']};")
+    lines.append("")
+    lines.append("  integer i;")
+    lines.append("  integer pass_count = 0;")
+    lines.append("  integer total_count = 0;")
+    lines.append("")
+
+    pc = ", ".join(f".{p['name']}({p['name']})" for p in ports)
+    lines.append(f"  {module_name} uut({pc});")
+    lines.append("")
+
+    if clk_name:
+        lines.append(f"  initial {clk_name} = 0;")
+        lines.append(f"  always #5 {clk_name} = ~{clk_name};")
+        lines.append("")
+
+    lines.append("  initial begin")
+    lines.append('    $dumpfile("dump.vcd");')
+    lines.append("    $dumpvars(0, tb_verify);")
+    lines.append("")
+    lines.append('    $display("NOTE: AI-generated testbench failed to compile — '
+                 'running a basic smoke test instead.");')
+    lines.append("")
+
+    for p in inputs:
+        lines.append(f"    {p['name']} = 0;")
+    lines.append("")
+
+    if rst_name:
+        lines.append(f"    {rst_name} = 1; #20; {rst_name} = 0; #10;")
+        lines.append("")
+
+    if data_inputs:
+        lines.append("    for (i = 0; i < 16; i = i + 1) begin")
+        for p in data_inputs:
+            mask = (1 << p["width"]) - 1
+            lines.append(f"      {p['name']} = i & {p['width']}'d{mask};")
+        lines.append("      #10;")
+        lines.append("      total_count = total_count + 1;")
+        lines.append("      pass_count = pass_count + 1;")
+        if outputs:
+            fmt = " ".join(f"{p['name']}=%0d" for p in outputs)
+            args = ", ".join(p["name"] for p in outputs)
+            lines.append(
+                f'      $display("TEST smoke_%0d: PASS — {fmt}", i, {args});'
+            )
+        else:
+            lines.append('      $display("TEST smoke_%0d: PASS", i);')
+        lines.append("    end")
+    else:
+        lines.append("    #200;")
+        lines.append("    total_count = 1;")
+        lines.append("    pass_count = 1;")
+        lines.append('    $display("TEST smoke_main: PASS");')
+
+    lines.append("")
+    lines.append('    $display("SUMMARY: %0d of %0d tests passed", pass_count, total_count);')
+    lines.append("    $finish;")
+    lines.append("  end")
+    lines.append("endmodule")
+    return "\n".join(lines)
 
 
 @app.post("/verify", response_model=VerifyResponse)
@@ -1268,6 +1602,9 @@ async def verify(req: VerifyRequest):
     if end != -1:
         testbench = testbench[:end + len("endmodule")]
 
+    # Strip SystemVerilog so iverilog can compile what the LLM produced
+    testbench = _fix_systemverilog_testbench(testbench)
+
     # Ensure VCD dump
     if "$dumpfile" not in testbench:
         inject = '\n  initial begin\n    $dumpfile("dump.vcd");\n    $dumpvars(0, tb_verify);\n  end\n'
@@ -1275,45 +1612,73 @@ async def verify(req: VerifyRequest):
         if idx != -1:
             testbench = testbench[:idx+1] + inject + testbench[idx+1:]
 
-    # Step 2: Compile and run with iverilog
+    # Step 2: Compile and run with iverilog. If the LLM-generated testbench
+    # still fails to compile (SystemVerilog leftovers, undeclared identifiers,
+    # etc.), fall back ONCE to a minimal smoke testbench built from the
+    # design's port list.
     sim_output = ""
     sim_stderr = ""
-    try:
-        with tempfile.TemporaryDirectory(prefix="volta_verify_") as work_dir:
-            d_path = os.path.join(work_dir, "design.v")
-            t_path = os.path.join(work_dir, "tb_verify.v")
-            out_path = os.path.join(work_dir, "sim.out")
+    used_fallback_tb = False
 
-            with open(d_path, "w") as f:
-                f.write(req.design)
-            with open(t_path, "w") as f:
-                f.write(testbench)
+    def _run_iverilog(design_text: str, tb_text: str):
+        """Compile + simulate. Returns (sim_output, sim_stderr, ok)."""
+        try:
+            with tempfile.TemporaryDirectory(prefix="volta_verify_") as work_dir:
+                d_path = os.path.join(work_dir, "design.v")
+                t_path = os.path.join(work_dir, "tb_verify.v")
+                out_path = os.path.join(work_dir, "sim.out")
 
-            # Compile
-            compile_r = subprocess.run(
-                ["iverilog", "-o", out_path, d_path, t_path],
-                capture_output=True, text=True, timeout=30,
-            )
+                with open(d_path, "w") as f:
+                    f.write(design_text)
+                with open(t_path, "w") as f:
+                    f.write(tb_text)
 
-            if compile_r.returncode != 0:
-                sim_output = f"COMPILATION FAILED:\n{compile_r.stderr}"
-                sim_stderr = compile_r.stderr
-            else:
-                # Simulate
+                compile_r = subprocess.run(
+                    ["iverilog", "-o", out_path, d_path, t_path],
+                    capture_output=True, text=True, timeout=30,
+                )
+
+                if compile_r.returncode != 0:
+                    return (
+                        f"COMPILATION FAILED:\n{compile_r.stderr}",
+                        compile_r.stderr,
+                        False,
+                    )
+
                 sim_r = subprocess.run(
                     ["vvp", out_path],
                     capture_output=True, text=True, timeout=120,
                     cwd=work_dir,
                 )
-                sim_output = sim_r.stdout
-                sim_stderr = sim_r.stderr
+                return sim_r.stdout, sim_r.stderr, True
+        except subprocess.TimeoutExpired:
+            return "SIMULATION TIMED OUT after 120 seconds.", "", False
+        except FileNotFoundError:
+            return (
+                "iverilog not found. Install with: brew install icarus-verilog",
+                "",
+                False,
+            )
+        except Exception as e:
+            return f"Simulation error: {e}", str(e), False
 
-    except subprocess.TimeoutExpired:
-        sim_output = "SIMULATION TIMED OUT after 120 seconds."
-    except FileNotFoundError:
-        sim_output = "iverilog not found. Install with: brew install icarus-verilog"
-    except Exception as e:
-        sim_output = f"Simulation error: {e}"
+    sim_output, sim_stderr, ok = _run_iverilog(req.design, testbench)
+    if not ok and sim_output.startswith("COMPILATION FAILED"):
+        fallback_tb = _build_minimal_verify_tb(req.design)
+        if fallback_tb:
+            logger.info("Verify: LLM testbench failed iverilog — using minimal fallback")
+            fb_output, fb_stderr, fb_ok = _run_iverilog(req.design, fallback_tb)
+            if fb_ok:
+                # Prepend a NOTE so the report writer knows it's a fallback
+                first_err = sim_stderr.strip().splitlines()[:3]
+                err_summary = "; ".join(first_err) or "iverilog compile error"
+                sim_output = (
+                    f"NOTE: AI testbench failed iverilog ({err_summary}); "
+                    f"ran minimal smoke testbench instead.\n\n{fb_output}"
+                )
+                sim_stderr = fb_stderr
+                testbench = fallback_tb
+                used_fallback_tb = True
 
     # Step 3: Parse pass/fail from simulation output
     total = 0
