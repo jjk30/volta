@@ -1159,6 +1159,43 @@ Design code:
 {design}
 ```
 
+CRITICAL TIMING RULES — outputs read as 'x' if you check them too early:
+1. For SEQUENTIAL designs (anything with `posedge clk`), set inputs FIRST,
+   then wait at least one full clock cycle PLUS a small settle delay
+   before checking outputs:
+       a = 4'd5; b = 4'd3; op = 2'b00;
+       @(posedge clk);   // wait for the rising edge
+       #1;               // settle time so non-blocking updates land
+       // NOW check outputs
+
+2. Equivalent simpler form (when clk has a 10-time-unit period):
+       a = 4'd5; b = 4'd3; op = 2'b00;
+       #10;              // one full clock period
+       #1;               // settle
+       // NOW check outputs
+
+3. For COMBINATIONAL designs (`always @(*)` only), a small delay is enough:
+       a = 4'd5; b = 4'd3;
+       #2;
+       // NOW check outputs
+
+4. Apply RESET correctly before any test:
+       rst = 1;
+       #20;              // hold reset at least 2 clock cycles
+       rst = 0;
+       #10;              // wait one cycle after release
+       // NOW start tests
+
+5. Use plain if/else with $display for pass/fail (NEVER `assert`):
+       if (result !== 4'd8)
+         $display("TEST add_5_3: FAIL — expected 8, got %0d", result);
+       else
+         $display("TEST add_5_3: PASS");
+
+6. In sequential designs, ALWAYS pair input changes with `@(posedge clk); #1;`
+   before EVERY output check. Never check outputs immediately after assigning
+   inputs — they will read as 'x'.
+
 CRITICAL VERILOG RULES — the testbench MUST compile with iverilog (Verilog-2005 only):
 - Do NOT use SystemVerilog syntax: no `logic` type, no `task` blocks, no
   `function` definitions, no `interface`, no `class`, no `package`, no
@@ -1426,6 +1463,208 @@ def _fix_systemverilog_testbench(code: str) -> str:
     return code.strip()
 
 
+def _fix_verify_timing(testbench_code: str, design_code: str) -> str:
+    """Patch up timing in the LLM-generated verification testbench.
+
+    The model often forgets that for clocked designs, outputs are 'x' until a
+    clock edge propagates the registered values. The cleanups below are
+    conservative — they only insert delays where they're missing, and never
+    rewrite real logic.
+
+    Heuristic checks:
+      * Detect whether the DESIGN is sequential (`posedge`/`negedge`).
+      * For sequential designs, before any output-checking line that follows
+        an input assignment with no clock-edge wait in between, insert a
+        `@(posedge <clk>); #1;` pair so the registered output has settled.
+      * Make sure there's a clock generator (`initial clk = 0; always #5
+        clk = ~clk;`) — if the design needs a clock and the testbench is
+        missing one, inject it just after the testbench's input/output
+        declarations.
+      * Stretch reset to at least #20 high + #10 low if a too-short reset
+        is found.
+
+    Combinational designs are left alone — there's nothing to align with.
+    """
+
+    # ---- 1. Is this a sequential design? -----------------------------------
+    is_sequential = bool(re.search(r'\b(?:posedge|negedge)\b', design_code))
+    if not is_sequential:
+        return testbench_code
+
+    # ---- 2. Identify the clock signal name from the design -----------------
+    clk_match = re.search(
+        r'\b(?:posedge|negedge)\s+(\w+)',
+        design_code,
+    )
+    clk_name = clk_match.group(1) if clk_match else 'clk'
+
+    # ---- 3. Make sure the testbench has a clock generator ------------------
+    has_clk_gen = bool(re.search(
+        rf'always\s+(?:#\d+\s+)?{re.escape(clk_name)}\s*=\s*~\s*{re.escape(clk_name)}',
+        testbench_code,
+    ))
+    has_clk_init = bool(re.search(
+        rf'initial\s+{re.escape(clk_name)}\s*=\s*0\s*;',
+        testbench_code,
+    ))
+
+    if not has_clk_gen:
+        # Inject a clock generator just before the first `initial begin` block.
+        injection = (
+            f'\n  initial {clk_name} = 0;\n'
+            f'  always #5 {clk_name} = ~{clk_name};\n'
+        )
+        idx = testbench_code.find('initial begin')
+        if idx == -1:
+            idx = testbench_code.find('initial')
+        if idx != -1:
+            testbench_code = testbench_code[:idx] + injection + '\n  ' + testbench_code[idx:]
+    elif not has_clk_init:
+        # Generator exists but no initial value — inject one so clk doesn't
+        # start at 'x'.
+        idx = testbench_code.find('initial begin')
+        if idx == -1:
+            idx = testbench_code.find('initial')
+        if idx != -1:
+            testbench_code = (
+                testbench_code[:idx]
+                + f'initial {clk_name} = 0;\n  '
+                + testbench_code[idx:]
+            )
+
+    # ---- 4. Stretch a too-short reset --------------------------------------
+    rst_match = re.search(
+        r'\b(rst|reset|rstn|rst_n)\b',
+        re.search(
+            r'module\s+\w+\s*\((.*?)\)\s*;',
+            design_code, re.DOTALL,
+        ).group(1) if re.search(r'module\s+\w+\s*\(', design_code) else '',
+    )
+    if rst_match:
+        rst_name = rst_match.group(1)
+        # Find `<rst> = 1;` and a small delay after it. If the delay is < 20,
+        # bump it. Same on the release side.
+        def _stretch(m):
+            delay = int(m.group(1))
+            return m.group(0) if delay >= 20 else m.group(0).replace(f'#{delay}', '#20')
+        testbench_code = re.sub(
+            rf'{re.escape(rst_name)}\s*=\s*1\s*;\s*#(\d+)\s*;',
+            _stretch,
+            testbench_code,
+        )
+        def _stretch_release(m):
+            delay = int(m.group(1))
+            return m.group(0) if delay >= 10 else m.group(0).replace(f'#{delay}', '#10')
+        testbench_code = re.sub(
+            rf'{re.escape(rst_name)}\s*=\s*0\s*;\s*#(\d+)\s*;',
+            _stretch_release,
+            testbench_code,
+        )
+
+    # ---- 4b. After `rst = 0;`, ensure the reset-release propagates before
+    #         the first input change. Without this, the same posedge clk
+    #         that sees rst=0 also sees the new input — the testbench gets
+    #         an extra clock's worth of effect on its very first check.
+    if rst_match:
+        rst_name = rst_match.group(1)
+        rst_release_pat = re.compile(
+            rf'^(?P<indent>\s*){re.escape(rst_name)}\s*=\s*0\s*;\s*$'
+        )
+        rst_re_lines = testbench_code.split('\n')
+        out_after_release: list[str] = []
+        for i, raw in enumerate(rst_re_lines):
+            out_after_release.append(raw)
+            m = rst_release_pat.match(raw)
+            if not m:
+                continue
+            # Look ahead at the next 1-2 non-blank/non-comment lines to see if
+            # there's already a clock-aligned wait or a #N >= 10 delay there.
+            already_propagated = False
+            ahead = 0
+            for j in range(i + 1, min(len(rst_re_lines), i + 5)):
+                stripped = rst_re_lines[j].strip()
+                if not stripped or stripped.startswith('//'):
+                    continue
+                if re.search(rf'@\s*\(\s*(?:posedge|negedge)\s+{re.escape(clk_name)}\b', rst_re_lines[j]):
+                    already_propagated = True
+                    break
+                dm = re.match(r'^\s*#\s*(\d+)\s*;\s*$', rst_re_lines[j])
+                if dm and int(dm.group(1)) >= 10:
+                    already_propagated = True
+                    break
+                ahead += 1
+                if ahead >= 2:
+                    break
+            if not already_propagated:
+                indent = m.group('indent')
+                out_after_release.append(f'{indent}@(posedge {clk_name});')
+                out_after_release.append(f'{indent}#1;')
+        testbench_code = '\n'.join(out_after_release)
+
+    # ---- 5. Insert clock-aligned waits before every output check -----------
+    # We treat any `if (...!==...)` (or `===` / `!=` / `==`) line whose body
+    # mentions $display as an output-check. For sequential designs we want a
+    # `@(posedge clk); #1;` pair immediately before each one so the
+    # registered output has settled — otherwise the check sees 'x'.
+    #
+    # We don't blindly inject — we look back through the few preceding
+    # non-blank/non-comment lines and skip if a clock-edge wait is already
+    # there. This keeps existing well-formed testbenches intact and only
+    # patches up the LLM's typical "set inputs, immediately check" pattern.
+    lines = testbench_code.split('\n')
+    check_re = re.compile(r'^\s*if\s*\(.*?(?:!==|===|!=|==).+\)')
+    clock_wait_re = re.compile(
+        rf'@\s*\(\s*(?:posedge|negedge)\s+{re.escape(clk_name)}\b'
+    )
+
+    def _check_has_display(idx: int) -> bool:
+        """Is this an output-check? (if-comparison whose body $displays)"""
+        if not check_re.match(lines[idx]):
+            return False
+        # The $display might be on the same line or the next one
+        for j in range(idx, min(len(lines), idx + 3)):
+            if '$display' in lines[j]:
+                return True
+        return False
+
+    # Lines that change DUT state (any procedural assignment) are barriers
+    # — once we see one, we've LEFT the previous clock-alignment region and
+    # need a fresh `@(posedge clk); #1;` before the upcoming check.
+    assignment_re = re.compile(
+        r'^\s*\w+\s*(?:<=|=)\s*[^=].*;'
+    )
+
+    def _already_clock_aligned(idx: int) -> bool:
+        """Is there a clock-edge wait between the most recent assignment and
+        the current check? Walking backwards, the FIRST barrier we care
+        about is either a clock wait (good) or an assignment (bad)."""
+        seen = 0
+        for j in range(idx - 1, max(-1, idx - 12), -1):
+            stripped = lines[j].strip()
+            if not stripped or stripped.startswith('//'):
+                continue
+            if clock_wait_re.search(lines[j]):
+                return True
+            if assignment_re.match(lines[j]):
+                # An assignment between us and any prior clock wait means
+                # the wait we'd find further back doesn't apply to THIS check.
+                return False
+            seen += 1
+            if seen >= 6:
+                break
+        return False
+
+    out_lines: list[str] = []
+    for i, raw in enumerate(lines):
+        if _check_has_display(i) and not _already_clock_aligned(i):
+            indent = raw[:len(raw) - len(raw.lstrip())]
+            out_lines.append(f'{indent}@(posedge {clk_name});')
+            out_lines.append(f'{indent}#1;')
+        out_lines.append(raw)
+
+    return '\n'.join(out_lines)
+
+
 def _build_minimal_verify_tb(design_code: str) -> Optional[str]:
     """Programmatic minimal testbench used when the LLM-generated one cannot
     be salvaged. Drives 16 incrementing input patterns through the DUT,
@@ -1604,6 +1843,8 @@ async def verify(req: VerifyRequest):
 
     # Strip SystemVerilog so iverilog can compile what the LLM produced
     testbench = _fix_systemverilog_testbench(testbench)
+    # Patch up timing for sequential designs so output checks don't read 'x'
+    testbench = _fix_verify_timing(testbench, req.design)
 
     # Ensure VCD dump
     if "$dumpfile" not in testbench:
