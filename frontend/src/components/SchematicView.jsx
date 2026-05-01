@@ -322,135 +322,139 @@ function detectInterfaceModule(moduleName, code) {
   return null
 }
 
-// Canned sub-block layouts for interface modules.
+// Canned sub-block layouts for interface modules. Sub-blocks are placed on
+// a (col, row) grid — column 0 is input-facing, column N-1 is output-facing,
+// rows stack vertically when a column needs more than one block. The renderer
+// computes pixel coordinates from these logical positions and routes wires
+// around any block that sits between the source and destination column.
 const INTERFACE_TEMPLATES = {
   UART_TX: {
     label: 'UART Transmitter',
     subBlocks: [
-      { id: 'baud', label: 'Baud Gen', sub: 'counter', x: 80, y: 60 },
-      { id: 'fsm', label: 'FSM Control', sub: 'fsm', x: 80, y: 160 },
-      { id: 'shift', label: 'Shift Reg', sub: 'shift', x: 280, y: 110 },
+      { id: 'baud',  label: 'Baud Gen',    sub: 'counter', col: 0, row: 0 },
+      { id: 'fsm',   label: 'FSM Control', sub: 'fsm',     col: 1, row: 0 },
+      { id: 'shift', label: 'Shift Reg',   sub: 'shift',   col: 2, row: 0 },
     ],
     connections: [
-      { from: 'baud', to: 'shift', label: 'baud_tick', fromSide: 'right', toSide: 'left', toY: -10 },
-      { from: 'fsm', to: 'shift', label: 'load/shift', fromSide: 'right', toSide: 'left', toY: 10 },
-      { from: 'baud', to: 'fsm', label: 'tick', fromSide: 'bottom', toSide: 'top' },
+      { from: 'baud', to: 'fsm',   label: 'tick' },
+      { from: 'fsm',  to: 'shift', label: 'load/shift' },
+      { from: 'baud', to: 'shift', label: 'baud_tick' },
     ],
     externalPorts: {
-      inputs: ['clk', 'rst', 'tx_data', 'tx_en'],
+      inputs:  ['clk', 'rst', 'tx_data', 'tx_en'],
       outputs: ['tx', 'tx_done'],
     },
     externalWires: [
-      { port: 'clk', to: 'baud', toSide: 'left', targetY: -15 },
-      { port: 'rst', to: 'fsm', toSide: 'left', targetY: -15 },
-      { port: 'tx_data', to: 'shift', toSide: 'left', targetY: -25 },
-      { port: 'tx_en', to: 'fsm', toSide: 'left', targetY: 15 },
-      { port: 'tx', from: 'shift', fromSide: 'right' },
-      { port: 'tx_done', from: 'fsm', fromSide: 'right' },
+      { port: 'clk',     to: 'baud' },
+      { port: 'rst',     to: 'fsm' },
+      { port: 'tx_data', to: 'shift' },
+      { port: 'tx_en',   to: 'fsm' },
+      { port: 'tx',      from: 'shift' },
+      { port: 'tx_done', from: 'fsm' },
     ],
   },
   UART_RX: {
     label: 'UART Receiver',
     subBlocks: [
-      { id: 'baud', label: 'Baud Gen', sub: 'counter', x: 80, y: 60 },
-      { id: 'fsm', label: 'FSM Control', sub: 'fsm', x: 80, y: 160 },
-      { id: 'shift', label: 'Shift Reg', sub: 'shift', x: 280, y: 110 },
+      { id: 'baud',  label: 'Baud Gen',    sub: 'counter', col: 0, row: 0 },
+      { id: 'fsm',   label: 'FSM Control', sub: 'fsm',     col: 1, row: 0 },
+      { id: 'shift', label: 'Shift Reg',   sub: 'shift',   col: 2, row: 0 },
     ],
     connections: [
-      { from: 'baud', to: 'shift', label: 'sample', fromSide: 'right', toSide: 'left', toY: -10 },
-      { from: 'fsm', to: 'shift', label: 'capture', fromSide: 'right', toSide: 'left', toY: 10 },
-      { from: 'baud', to: 'fsm', label: 'tick', fromSide: 'bottom', toSide: 'top' },
+      { from: 'baud', to: 'fsm',   label: 'tick' },
+      { from: 'fsm',  to: 'shift', label: 'capture' },
+      { from: 'baud', to: 'shift', label: 'sample' },
     ],
     externalPorts: {
-      inputs: ['clk', 'rst', 'rx'],
+      inputs:  ['clk', 'rst', 'rx'],
       outputs: ['rx_data', 'rx_valid'],
     },
     externalWires: [
-      { port: 'clk', to: 'baud', toSide: 'left', targetY: -15 },
-      { port: 'rst', to: 'fsm', toSide: 'left', targetY: -15 },
-      { port: 'rx', to: 'shift', toSide: 'left', targetY: -25 },
-      { port: 'rx_data', from: 'shift', fromSide: 'right' },
-      { port: 'rx_valid', from: 'fsm', fromSide: 'right' },
+      { port: 'clk',      to: 'baud' },
+      { port: 'rst',      to: 'fsm' },
+      { port: 'rx',       to: 'shift' },
+      { port: 'rx_data',  from: 'shift' },
+      { port: 'rx_valid', from: 'fsm' },
     ],
   },
   SPI_MASTER: {
     label: 'SPI Master',
     subBlocks: [
-      { id: 'clkgen', label: 'Clock Gen', sub: 'counter', x: 80, y: 60 },
-      { id: 'fsm', label: 'FSM Control', sub: 'fsm', x: 80, y: 160 },
-      { id: 'shift', label: 'Shift Reg', sub: 'shift', x: 280, y: 110 },
+      { id: 'clkgen', label: 'Clock Gen',   sub: 'counter', col: 0, row: 0 },
+      { id: 'fsm',    label: 'FSM Control', sub: 'fsm',     col: 1, row: 0 },
+      { id: 'shift',  label: 'Shift Reg',   sub: 'shift',   col: 2, row: 0 },
     ],
     connections: [
-      { from: 'clkgen', to: 'shift', label: 'shift_clk', fromSide: 'right', toSide: 'left', toY: -10 },
-      { from: 'fsm', to: 'shift', label: 'load', fromSide: 'right', toSide: 'left', toY: 10 },
-      { from: 'clkgen', to: 'fsm', label: 'tick', fromSide: 'bottom', toSide: 'top' },
+      { from: 'clkgen', to: 'fsm',   label: 'tick' },
+      { from: 'fsm',    to: 'shift', label: 'load' },
+      { from: 'clkgen', to: 'shift', label: 'shift_clk' },
     ],
     externalPorts: {
-      inputs: ['clk', 'rst', 'miso', 'tx_data', 'start'],
+      inputs:  ['clk', 'rst', 'miso', 'tx_data', 'start'],
       outputs: ['sclk', 'mosi', 'cs', 'done'],
     },
     externalWires: [
-      { port: 'clk', to: 'clkgen', toSide: 'left', targetY: -15 },
-      { port: 'rst', to: 'fsm', toSide: 'left', targetY: -15 },
-      { port: 'start', to: 'fsm', toSide: 'left', targetY: 15 },
-      { port: 'tx_data', to: 'shift', toSide: 'left', targetY: -25 },
-      { port: 'miso', to: 'shift', toSide: 'left', targetY: 25 },
-      { port: 'sclk', from: 'clkgen', fromSide: 'right' },
-      { port: 'mosi', from: 'shift', fromSide: 'right' },
-      { port: 'cs', from: 'fsm', fromSide: 'right' },
-      { port: 'done', from: 'fsm', fromSide: 'right' },
+      { port: 'clk',     to: 'clkgen' },
+      { port: 'rst',     to: 'fsm' },
+      { port: 'start',   to: 'fsm' },
+      { port: 'tx_data', to: 'shift' },
+      { port: 'miso',    to: 'shift' },
+      { port: 'sclk',    from: 'clkgen' },
+      { port: 'mosi',    from: 'shift' },
+      { port: 'cs',      from: 'fsm' },
+      { port: 'done',    from: 'fsm' },
     ],
   },
   SPI_SLAVE: {
     label: 'SPI Slave',
     subBlocks: [
-      { id: 'shift', label: 'Shift Reg', sub: 'shift', x: 80, y: 110 },
-      { id: 'fsm', label: 'FSM Control', sub: 'fsm', x: 280, y: 160 },
-      { id: 'latch', label: 'RX Latch', sub: 'reg', x: 280, y: 60 },
+      { id: 'shift', label: 'Shift Reg',   sub: 'shift', col: 0, row: 0 },
+      { id: 'latch', label: 'RX Latch',    sub: 'reg',   col: 1, row: 0 },
+      { id: 'fsm',   label: 'FSM Control', sub: 'fsm',   col: 1, row: 1 },
     ],
     connections: [
-      { from: 'shift', to: 'latch', label: 'rx_word', fromSide: 'right', toSide: 'left' },
-      { from: 'shift', to: 'fsm', label: 'bit_cnt', fromSide: 'right', toSide: 'left', toY: -10 },
+      { from: 'shift', to: 'latch', label: 'rx_word' },
+      { from: 'shift', to: 'fsm',   label: 'bit_cnt' },
     ],
     externalPorts: {
-      inputs: ['sclk', 'mosi', 'cs'],
+      inputs:  ['sclk', 'mosi', 'cs'],
       outputs: ['miso', 'rx_data', 'rx_valid'],
     },
     externalWires: [
-      { port: 'sclk', to: 'shift', toSide: 'left', targetY: -15 },
-      { port: 'mosi', to: 'shift', toSide: 'left', targetY: 0 },
-      { port: 'cs', to: 'fsm', toSide: 'left', targetY: -15 },
-      { port: 'miso', from: 'shift', fromSide: 'right' },
-      { port: 'rx_data', from: 'latch', fromSide: 'right' },
-      { port: 'rx_valid', from: 'fsm', fromSide: 'right' },
+      { port: 'sclk',     to: 'shift' },
+      { port: 'mosi',     to: 'shift' },
+      { port: 'cs',       to: 'fsm' },
+      { port: 'miso',     from: 'shift' },
+      { port: 'rx_data',  from: 'latch' },
+      { port: 'rx_valid', from: 'fsm' },
     ],
   },
   I2C: {
     label: 'I2C Controller',
     subBlocks: [
-      { id: 'clkgen', label: 'SCL Gen', sub: 'counter', x: 80, y: 60 },
-      { id: 'fsm', label: 'FSM', sub: 'fsm', x: 80, y: 160 },
-      { id: 'shift', label: 'Shift Reg', sub: 'shift', x: 280, y: 110 },
+      { id: 'clkgen', label: 'SCL Gen',   sub: 'counter', col: 0, row: 0 },
+      { id: 'fsm',    label: 'FSM',       sub: 'fsm',     col: 1, row: 0 },
+      { id: 'shift',  label: 'Shift Reg', sub: 'shift',   col: 2, row: 0 },
     ],
     connections: [
-      { from: 'clkgen', to: 'shift', label: 'scl_edge', fromSide: 'right', toSide: 'left', toY: -10 },
-      { from: 'fsm', to: 'shift', label: 'ack/load', fromSide: 'right', toSide: 'left', toY: 10 },
-      { from: 'clkgen', to: 'fsm', label: 'tick', fromSide: 'bottom', toSide: 'top' },
+      { from: 'clkgen', to: 'fsm',   label: 'tick' },
+      { from: 'fsm',    to: 'shift', label: 'ack/load' },
+      { from: 'clkgen', to: 'shift', label: 'scl_edge' },
     ],
     externalPorts: {
-      inputs: ['clk', 'rst', 'start', 'addr', 'data_in'],
+      inputs:  ['clk', 'rst', 'start', 'addr', 'data_in'],
       outputs: ['scl', 'sda', 'data_out', 'done'],
     },
     externalWires: [
-      { port: 'clk', to: 'clkgen', toSide: 'left', targetY: -15 },
-      { port: 'rst', to: 'fsm', toSide: 'left', targetY: -15 },
-      { port: 'start', to: 'fsm', toSide: 'left', targetY: 15 },
-      { port: 'addr', to: 'shift', toSide: 'left', targetY: -25 },
-      { port: 'data_in', to: 'shift', toSide: 'left', targetY: 0 },
-      { port: 'scl', from: 'clkgen', fromSide: 'right' },
-      { port: 'sda', from: 'shift', fromSide: 'right' },
-      { port: 'data_out', from: 'shift', fromSide: 'right' },
-      { port: 'done', from: 'fsm', fromSide: 'right' },
+      { port: 'clk',      to: 'clkgen' },
+      { port: 'rst',      to: 'fsm' },
+      { port: 'start',    to: 'fsm' },
+      { port: 'addr',     to: 'shift' },
+      { port: 'data_in',  to: 'shift' },
+      { port: 'scl',      from: 'clkgen' },
+      { port: 'sda',      from: 'shift' },
+      { port: 'data_out', from: 'shift' },
+      { port: 'done',     from: 'fsm' },
     ],
   },
 }
@@ -1757,7 +1761,7 @@ function FlatView({
                  onMouseEnter={() => setHoveredSignal(p.name)}
                  onMouseLeave={() => setHoveredSignal(null)}
               >
-                <circle cx={p.x} cy={p.y} r="3" fill={color} />
+                <circle cx={p.x} cy={p.y} r="5" fill={color} />
                 <text x={COL_INPUT_LABEL_X} y={p.y + 4} textAnchor="end" fill={color}
                   fontFamily="'JetBrains Mono', monospace" fontSize="11">
                   {formatSignal(p.name, p.isClock)}
@@ -1839,7 +1843,7 @@ function FlatView({
                  onMouseEnter={() => setHoveredSignal(o.name)}
                  onMouseLeave={() => setHoveredSignal(null)}
               >
-                <circle cx={COL_OUTPUT_X} cy={y} r="3" fill={color} />
+                <circle cx={COL_OUTPUT_X} cy={y} r="5" fill={color} />
                 <text x={COL_OUTPUT_LABEL_X} y={y + 4} textAnchor="start" fill={color}
                   fontFamily="'JetBrains Mono', monospace" fontSize="11">
                   {formatSignal(o.name, false)}
@@ -1873,34 +1877,209 @@ function FlatView({
 // ----------------------------- Hierarchical view ----------------------------
 
 function HierarchicalView({ module: mod, template, interfaceType, hasErrors, logicIssues = [] }) {
-  const W = 620, H = 460
-  const OUTER_PAD_L = 170
-  const OUTER_PAD_R = 160
-  const OUTER_PAD_T = 40
-  const OUTER_PAD_B = 40
+  // ----- Geometry constants -------------------------------------------------
+  const SUB_W = 150
+  const SUB_H = 80
+  const COL_GAP = 100              // horizontal gap between sub-block columns
+  const ROW_GAP = 80               // vertical gap between sub-blocks in a column
+  const INNER_PAD = 60             // padding inside the dashed boundary
+  const SVG_PAD = 50               // padding from SVG edge to label area
+  const LABEL_AREA = 140           // room for external port labels (per side)
+  const TITLE_GAP = 36             // space above the boundary for module name
+  const PORT_SPACING = 35
+  const PIN_OFFSET = 18            // vertical spacing of pins on a block edge
 
-  const outerLeft = OUTER_PAD_L
-  const outerTop = OUTER_PAD_T
-  const outerRight = W - OUTER_PAD_R
-  const outerBottom = H - OUTER_PAD_B
+  // ----- Logical → physical placement --------------------------------------
+  const cols = Math.max(...template.subBlocks.map(b => b.col)) + 1
+  const rowsPerCol = new Map()
+  for (const b of template.subBlocks) {
+    rowsPerCol.set(b.col, Math.max(rowsPerCol.get(b.col) || 0, b.row + 1))
+  }
+  const maxRows = Math.max(1, ...rowsPerCol.values())
 
-  const subBlockSize = { w: 110, h: 60 }
+  // Inner block region
+  const blocksW = cols * SUB_W + (cols - 1) * COL_GAP
+  const blocksH = maxRows * SUB_H + (maxRows - 1) * ROW_GAP
 
-  // Place each sub-block; positions in the template are relative to the outer rect
+  // Boundary dimensions — at least 700×500 per the spec
+  const boundaryW = Math.max(700, blocksW + INNER_PAD * 2)
+  const boundaryH = Math.max(500, blocksH + INNER_PAD * 2,
+    Math.max(template.externalPorts.inputs.length,
+             template.externalPorts.outputs.length) * PORT_SPACING + 80)
+
+  // SVG dimensions
+  const svgW = boundaryW + LABEL_AREA * 2 + SVG_PAD * 2
+  const svgH = boundaryH + TITLE_GAP + SVG_PAD * 2
+
+  // Boundary placement inside the SVG
+  const boundaryX = SVG_PAD + LABEL_AREA
+  const boundaryY = SVG_PAD + TITLE_GAP
+
+  // Centre the block grid inside the boundary
+  const blocksOffsetX = boundaryX + INNER_PAD + (boundaryW - INNER_PAD * 2 - blocksW) / 2
+  const blocksOffsetY = boundaryY + INNER_PAD + (boundaryH - INNER_PAD * 2 - blocksH) / 2
+
   const blocks = template.subBlocks.map(sb => ({
     ...sb,
-    cx: outerLeft + sb.x + subBlockSize.w / 2,
-    cy: outerTop + sb.y + subBlockSize.h / 2,
-    w: subBlockSize.w, h: subBlockSize.h,
+    cx: blocksOffsetX + sb.col * (SUB_W + COL_GAP) + SUB_W / 2,
+    cy: blocksOffsetY + sb.row * (SUB_H + ROW_GAP) + SUB_H / 2,
+    w: SUB_W, h: SUB_H,
   }))
   const blockById = new Map(blocks.map(b => [b.id, b]))
 
-  const leftPortsY = template.externalPorts.inputs.map((_, i, arr) =>
-    outerTop + (H - OUTER_PAD_T - OUTER_PAD_B) * ((i + 1) / (arr.length + 1))
-  )
-  const rightPortsY = template.externalPorts.outputs.map((_, i, arr) =>
-    outerTop + (H - OUTER_PAD_T - OUTER_PAD_B) * ((i + 1) / (arr.length + 1))
-  )
+  // ----- Pin allocation ----------------------------------------------------
+  // For each sub-block, count the wires that terminate on its left side
+  // (incoming = internal `to` + external `to`) and right side (outgoing =
+  // internal `from` + external `from`). Each gets a unique vertical Y so
+  // wires never stack on top of each other.
+  const leftPins = new Map()       // blockId → array of consumer keys, in order
+  const rightPins = new Map()
+  const ensureList = (m, k) => { if (!m.has(k)) m.set(k, []); return m.get(k) }
+
+  for (const c of template.connections) {
+    ensureList(rightPins, c.from).push({ kind: 'conn', label: c.label, conn: c })
+    ensureList(leftPins, c.to).push({ kind: 'conn', label: c.label, conn: c })
+  }
+  for (const w of template.externalWires) {
+    if (w.to)   ensureList(leftPins, w.to).push({ kind: 'ext-in', port: w.port })
+    if (w.from) ensureList(rightPins, w.from).push({ kind: 'ext-out', port: w.port })
+  }
+
+  /** Pin Y position on a block edge. `i` is the index in the side's list. */
+  const pinY = (block, side, i, count) => {
+    if (count <= 1) return block.cy
+    const offset = (i - (count - 1) / 2) * PIN_OFFSET
+    return block.cy + offset
+  }
+
+  // Map (blockId, side, key) → pin Y
+  const pinYByKey = new Map()
+  for (const [bid, list] of leftPins) {
+    const block = blockById.get(bid)
+    list.forEach((entry, i) => {
+      const key = entry.kind === 'conn'
+        ? `conn-${entry.conn.from}-${entry.conn.to}`
+        : `ext-${entry.port}`
+      pinYByKey.set(`${bid}|left|${key}`, pinY(block, 'left', i, list.length))
+    })
+  }
+  for (const [bid, list] of rightPins) {
+    const block = blockById.get(bid)
+    list.forEach((entry, i) => {
+      const key = entry.kind === 'conn'
+        ? `conn-${entry.conn.from}-${entry.conn.to}`
+        : `ext-${entry.port}`
+      pinYByKey.set(`${bid}|right|${key}`, pinY(block, 'right', i, list.length))
+    })
+  }
+
+  // ----- External port positions (outside the boundary) --------------------
+  const inputs = template.externalPorts.inputs
+  const outputs = template.externalPorts.outputs
+  const inSpacing = inputs.length > 1
+    ? Math.max(PORT_SPACING, (boundaryH - 60) / (inputs.length + 1))
+    : 0
+  const outSpacing = outputs.length > 1
+    ? Math.max(PORT_SPACING, (boundaryH - 60) / (outputs.length + 1))
+    : 0
+  const inputColumnTop = boundaryY + (boundaryH - (inputs.length - 1) * inSpacing) / 2
+  const outputColumnTop = boundaryY + (boundaryH - (outputs.length - 1) * outSpacing) / 2
+
+  const inputPortByName = new Map()
+  inputs.forEach((name, i) => {
+    inputPortByName.set(name, { name, x: boundaryX, y: inputColumnTop + i * inSpacing })
+  })
+  const outputPortByName = new Map()
+  outputs.forEach((name, i) => {
+    outputPortByName.set(name, { name, x: boundaryX + boundaryW, y: outputColumnTop + i * outSpacing })
+  })
+
+  // ----- Wire routing ------------------------------------------------------
+  // External-input wires first (port → block.left)
+  // External-output wires (block.right → port)
+  // Internal wires (block.right → block.left), routing over a sky-lane when
+  // the source and destination columns aren't adjacent.
+
+  const wires = []
+
+  // Sky-lane for connections that skip columns. We pick a Y just above the
+  // top row of blocks; if multiple skip-wires need the lane, they stagger.
+  const skyLaneBaseY = blocksOffsetY - 28
+  let skyLaneOffset = 0
+
+  for (const w of template.externalWires) {
+    if (w.to) {
+      const port = inputPortByName.get(w.port)
+      const block = blockById.get(w.to)
+      if (!port || !block) continue
+      const targetY = pinYByKey.get(`${w.to}|left|ext-${w.port}`) ?? block.cy
+      const targetX = block.cx - block.w / 2
+      // Each external input has its own approach lane just inside the
+      // boundary so multiple inputs to the same block don't overlap.
+      const laneX = boundaryX + 30 + (Array.from(inputs).indexOf(w.port) * 8)
+      wires.push({
+        kind: 'ext-in',
+        signal: w.port,
+        points: [[port.x, port.y], [laneX, port.y], [laneX, targetY], [targetX, targetY]],
+      })
+    } else if (w.from) {
+      const port = outputPortByName.get(w.port)
+      const block = blockById.get(w.from)
+      if (!port || !block) continue
+      const sourceY = pinYByKey.get(`${w.from}|right|ext-${w.port}`) ?? block.cy
+      const sourceX = block.cx + block.w / 2
+      const laneX = boundaryX + boundaryW - 30 - (Array.from(outputs).indexOf(w.port) * 8)
+      wires.push({
+        kind: 'ext-out',
+        signal: w.port,
+        points: [[sourceX, sourceY], [laneX, sourceY], [laneX, port.y], [port.x, port.y]],
+      })
+    }
+  }
+
+  for (const c of template.connections) {
+    const from = blockById.get(c.from)
+    const to   = blockById.get(c.to)
+    if (!from || !to) continue
+    const key = `conn-${c.from}-${c.to}`
+    const fromY = pinYByKey.get(`${c.from}|right|${key}`) ?? from.cy
+    const toY   = pinYByKey.get(`${c.to}|left|${key}`) ?? to.cy
+    const fx = from.cx + from.w / 2
+    const tx = to.cx - to.w / 2
+    const colDiff = Math.abs(to.col - from.col)
+    let points
+    let labelPos
+
+    if (colDiff <= 1) {
+      // Adjacent columns: simple Manhattan, midX between blocks
+      const midX = (fx + tx) / 2
+      points = [[fx, fromY], [midX, fromY], [midX, toY], [tx, toY]]
+      labelPos = { x: midX, y: ((fromY + toY) / 2) - 6 }
+    } else {
+      // Non-adjacent (skip a column): route over a sky lane above the row
+      const lane = skyLaneBaseY - skyLaneOffset * 12
+      skyLaneOffset++
+      const exitX = fx + 20         // step out past `from` block
+      const entryX = tx - 20        // step in toward `to` block
+      points = [
+        [fx, fromY],
+        [exitX, fromY],
+        [exitX, lane],
+        [entryX, lane],
+        [entryX, toY],
+        [tx, toY],
+      ]
+      labelPos = { x: (exitX + entryX) / 2, y: lane - 6 }
+    }
+
+    wires.push({
+      kind: 'internal',
+      signal: c.label,
+      points,
+      label: c.label,
+      labelPos,
+    })
+  }
 
   return (
     <div style={{
@@ -1919,134 +2098,132 @@ function HierarchicalView({ module: mod, template, interfaceType, hasErrors, log
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '10px' }}>
         <svg
-          viewBox={`0 0 ${W} ${H}`}
-          style={{ width: '100%', maxWidth: `${W + 40}px`, height: 'auto', display: 'block', margin: '0 auto' }}
+          viewBox={`0 0 ${svgW} ${svgH}`}
+          preserveAspectRatio="xMidYMid meet"
+          style={{ width: '100%', maxWidth: `${svgW + 40}px`, height: 'auto', display: 'block', margin: '0 auto' }}
         >
-          {/* Outer dashed module boundary */}
-          <rect
-            x={outerLeft} y={outerTop} width={outerRight - outerLeft} height={outerBottom - outerTop}
-            rx="6" ry="6"
-            stroke={ACCENT} strokeWidth="1.5" strokeDasharray="6 4"
-            fill="none" opacity="0.7"
-          />
-          <text x={(outerLeft + outerRight) / 2} y={outerTop - 8} textAnchor="middle"
-            fill={ACCENT} fontSize="11" fontWeight="600" fontFamily="'JetBrains Mono', monospace">
+          {/* Module name centred ABOVE the dashed boundary, 14px bold */}
+          <text
+            x={boundaryX + boundaryW / 2}
+            y={boundaryY - 12}
+            textAnchor="middle"
+            fill={ACCENT}
+            fontSize="14"
+            fontWeight="700"
+            fontFamily="'JetBrains Mono', monospace">
             {mod.name}
           </text>
+          <text
+            x={boundaryX + boundaryW / 2}
+            y={boundaryY - 26}
+            textAnchor="middle"
+            fill={ACCENT}
+            fontSize="9"
+            opacity="0.65"
+            fontFamily="'JetBrains Mono', monospace">
+            {template.label}
+          </text>
 
-          {/* Left (input) ports */}
-          {template.externalPorts.inputs.map((name, i) => (
-            <g key={`ext-in-${i}`}>
-              <circle cx="30" cy={leftPortsY[i]} r="3" fill={ACCENT} />
-              <text x="42" y={leftPortsY[i] + 3} textAnchor="start"
-                fill={ACCENT} fontSize="10" fontFamily="'JetBrains Mono', monospace">
-                {name}
-              </text>
-            </g>
-          ))}
+          {/* Outer dashed module boundary */}
+          <rect
+            x={boundaryX} y={boundaryY}
+            width={boundaryW} height={boundaryH}
+            rx="6" ry="6"
+            stroke={ACCENT} strokeWidth="1.5" strokeDasharray="6 4"
+            fill="none" opacity="0.65"
+          />
 
-          {/* Right (output) ports */}
-          {template.externalPorts.outputs.map((name, i) => (
-            <g key={`ext-out-${i}`}>
-              <circle cx={W - 30} cy={rightPortsY[i]} r="3" fill={ACCENT} />
-              <text x={W - 42} y={rightPortsY[i] + 3} textAnchor="end"
-                fill={ACCENT} fontSize="10" fontFamily="'JetBrains Mono', monospace">
-                {name}
-              </text>
-            </g>
-          ))}
-
-          {/* External wires from module ports to sub-blocks */}
-          {template.externalWires.map((w, i) => {
-            let points
-            if (w.port && w.to) {
-              const portIdx = template.externalPorts.inputs.indexOf(w.port)
-              if (portIdx < 0) return null
-              const srcY = leftPortsY[portIdx]
-              const block = blockById.get(w.to)
-              if (!block) return null
-              const targetY = block.cy + (w.targetY || 0)
-              const targetX = block.cx - block.w / 2
-              points = [[30 + 4, srcY], [outerLeft - 20, srcY], [outerLeft - 20, targetY], [targetX, targetY]]
-            } else if (w.port && w.from) {
-              const portIdx = template.externalPorts.outputs.indexOf(w.port)
-              if (portIdx < 0) return null
-              const dstY = rightPortsY[portIdx]
-              const block = blockById.get(w.from)
-              if (!block) return null
-              const srcY = block.cy
-              const srcX = block.cx + block.w / 2
-              points = [[srcX, srcY], [outerRight + 20, srcY], [outerRight + 20, dstY], [W - 30 - 4, dstY]]
-            } else {
-              return null
-            }
+          {/* External input ports — labels OUTSIDE the boundary, right-aligned */}
+          {inputs.map((name, i) => {
+            const p = inputPortByName.get(name)
             return (
-              <polyline key={`extw-${i}`}
-                points={points.map(pp => pp.join(',')).join(' ')}
-                stroke={WIRE} strokeWidth="1.5" fill="none"
-              />
-            )
-          })}
-
-          {/* Internal wires between sub-blocks */}
-          {template.connections.map((c, i) => {
-            const from = blockById.get(c.from)
-            const to = blockById.get(c.to)
-            if (!from || !to) return null
-            let fx, fy, tx, ty
-            if (c.fromSide === 'right') { fx = from.cx + from.w / 2; fy = from.cy + (c.fromY || 0) }
-            else if (c.fromSide === 'bottom') { fx = from.cx; fy = from.cy + from.h / 2 }
-            else if (c.fromSide === 'top') { fx = from.cx; fy = from.cy - from.h / 2 }
-            else { fx = from.cx - from.w / 2; fy = from.cy + (c.fromY || 0) }
-
-            if (c.toSide === 'left') { tx = to.cx - to.w / 2; ty = to.cy + (c.toY || 0) }
-            else if (c.toSide === 'top') { tx = to.cx; ty = to.cy - to.h / 2 }
-            else if (c.toSide === 'bottom') { tx = to.cx; ty = to.cy + to.h / 2 }
-            else { tx = to.cx + to.w / 2; ty = to.cy + (c.toY || 0) }
-
-            // Manhattan route
-            const midX = (c.fromSide === 'right' || c.toSide === 'left')
-              ? Math.max(fx + 20, tx - 20)
-              : (fx + tx) / 2
-            let points
-            if (c.fromSide === 'bottom' && c.toSide === 'top') {
-              const midY = (fy + ty) / 2
-              points = [[fx, fy], [fx, midY], [tx, midY], [tx, ty]]
-            } else {
-              points = [[fx, fy], [midX, fy], [midX, ty], [tx, ty]]
-            }
-            return (
-              <g key={`iw-${i}`}>
-                <polyline
-                  points={points.map(pp => pp.join(',')).join(' ')}
-                  stroke={WIRE} strokeWidth="1.5" fill="none"
-                />
-                {c.label && (
-                  <text
-                    x={(midX || (fx + tx) / 2)}
-                    y={((fy + ty) / 2) - 4}
-                    textAnchor="middle"
-                    fill={ACCENT} fontSize="8" opacity="0.7"
-                    fontFamily="'JetBrains Mono', monospace"
-                  >
-                    {c.label}
-                  </text>
-                )}
+              <g key={`ext-in-${name}`}>
+                <text
+                  x={p.x - 12} y={p.y + 4}
+                  textAnchor="end"
+                  fill={ACCENT} fontSize="11"
+                  fontFamily="'JetBrains Mono', monospace">
+                  {name}
+                </text>
+                <circle cx={p.x} cy={p.y} r="5" fill={ACCENT} />
               </g>
             )
           })}
 
-          {/* Sub-blocks */}
+          {/* External output ports — labels OUTSIDE the boundary, left-aligned */}
+          {outputs.map((name, i) => {
+            const p = outputPortByName.get(name)
+            return (
+              <g key={`ext-out-${name}`}>
+                <circle cx={p.x} cy={p.y} r="5" fill={ACCENT} />
+                <text
+                  x={p.x + 12} y={p.y + 4}
+                  textAnchor="start"
+                  fill={ACCENT} fontSize="11"
+                  fontFamily="'JetBrains Mono', monospace">
+                  {name}
+                </text>
+              </g>
+            )
+          })}
+
+          {/* All wires — rendered with rounded 90° bends so corners are soft */}
+          {wires.map((w, i) => (
+            <path
+              key={`hw-${i}`}
+              d={roundedPath(w.points, 4)}
+              stroke={WIRE} strokeWidth="1.5" fill="none"
+              strokeLinecap="round" strokeLinejoin="round"
+              opacity="0.85"
+            />
+          ))}
+
+          {/* Internal-wire signal labels (positioned on the wire's most
+              visible segment, with a small background plate so the label
+              never gets washed out by a wire crossing behind it) */}
+          {wires.filter(w => w.label && w.labelPos).map((w, i) => {
+            const len = (w.label || '').length
+            const padX = 4
+            const plateW = len * 5.4 + padX * 2
+            return (
+              <g key={`hwl-${i}`}>
+                <rect
+                  x={w.labelPos.x - plateW / 2}
+                  y={w.labelPos.y - 8}
+                  width={plateW} height={11}
+                  rx="2"
+                  fill="var(--bg-primary)"
+                  opacity="0.9" />
+                <text
+                  x={w.labelPos.x} y={w.labelPos.y}
+                  textAnchor="middle"
+                  fill={ACCENT} fontSize="9" opacity="0.95"
+                  fontFamily="'JetBrains Mono', monospace">
+                  {w.label}
+                </text>
+              </g>
+            )
+          })}
+
+          {/* Sub-blocks — 150×80 with a clear title and type label */}
           {blocks.map((b) => (
             <g key={b.id} transform={`translate(${b.cx}, ${b.cy})`}>
-              <rect x={-b.w / 2} y={-b.h / 2} width={b.w} height={b.h}
-                rx="4" ry="4" stroke={ACCENT} strokeWidth="2" fill="none" />
-              <text x="0" y="-5" textAnchor="middle" fill={ACCENT}
-                fontSize="10" fontWeight="600" fontFamily="'JetBrains Mono', monospace">
+              <rect
+                x={-b.w / 2} y={-b.h / 2}
+                width={b.w} height={b.h}
+                rx="6" ry="6"
+                stroke={ACCENT} strokeWidth="2"
+                fill="var(--bg-primary)" />
+              <text x="0" y="-6" textAnchor="middle"
+                fill={ACCENT}
+                fontSize="12" fontWeight="700"
+                fontFamily="'JetBrains Mono', monospace">
                 {b.label}
               </text>
-              <text x="0" y="10" textAnchor="middle" fill={ACCENT}
-                fontSize="8" opacity="0.6" fontFamily="'JetBrains Mono', monospace">
+              <text x="0" y="14" textAnchor="middle"
+                fill={ACCENT} opacity="0.55"
+                fontSize="9" fontStyle="italic"
+                fontFamily="'JetBrains Mono', monospace">
                 {subLabel(b.sub)}
               </text>
             </g>
