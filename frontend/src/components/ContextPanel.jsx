@@ -3,14 +3,50 @@ import { useState } from 'react'
 /**
  * Context Panel — shows metadata about the current design.
  * Auto-updates from the design code (module name, port count).
- * Gate count and critical-path delay are placeholders for future integration.
+ *
+ * When an FPGA target is active and Yosys synthesis has run, additional
+ * FPGA-specific resource counters appear below the basic metadata
+ * (LUTs, Flip-Flops, Block RAM, DSPs, total cells, wires).
  */
 export default function ContextPanel({
   moduleName = 'untitled',
   portCount = 0,
   gateCount = null,
+  target = 'Icarus',
+  synthResult = null,
 }) {
   const [collapsed, setCollapsed] = useState(false)
+
+  const isFpga = target === 'iCE40 FPGA' || target === 'ECP5 FPGA'
+  const targetShort = target === 'iCE40 FPGA' ? 'iCE40'
+                     : target === 'ECP5 FPGA' ? 'ECP5'
+                     : null
+
+  // FPGA cell counters from the synthesis result. Cell-name lists cover
+  // both iCE40 (SB_*) and ECP5 (TRELLIS_*, DPxxKD, etc.) families.
+  const sumCells = (names) => {
+    if (!synthResult?.cells) return 0
+    return names.reduce((s, n) => s + (synthResult.cells[n] || 0), 0)
+  }
+  const luts = sumCells([
+    'SB_LUT4', 'LUT4', 'LUT5', 'LUT6', 'TRELLIS_SLICE', 'CCU2C',
+  ])
+  const ffs = sumCells([
+    'SB_DFF', 'SB_DFFE', 'SB_DFFR', 'SB_DFFS', 'SB_DFFSR', 'SB_DFFSS',
+    'SB_DFFER', 'SB_DFFES', 'SB_DFFESR', 'SB_DFFESS',
+    'TRELLIS_FF', 'DFF', 'DPRAM',
+  ])
+  const bram = sumCells([
+    'SB_RAM40_4K', 'SB_RAM40_4KNR', 'SB_RAM40_4KNW', 'SB_RAM40_4KNRNW',
+    'DP16KD', 'PDPW16KD',
+  ])
+  const dsps = sumCells([
+    'SB_MAC16', 'MULT18X18D', 'MULT9X9D', 'MULT18X18',
+  ])
+
+  const synthOk = synthResult?.success
+  const synthFailed = synthResult && synthResult.errors && synthResult.errors.length > 0
+  const fmt = (n) => synthOk ? n.toString() : '—'
 
   return (
     <div style={{
@@ -66,13 +102,57 @@ export default function ContextPanel({
             <MiniChipIcon />
           </div>
 
-          {/* Metadata rows */}
+          {/* Basic metadata */}
           <div style={{ display: 'grid', gap: '0' }}>
             <MetaRow label="Module" value={moduleName} />
             <MetaRow label="Ports" value={portCount.toString()} />
             <MetaRow label="Gates" value={gateCount != null ? gateCount.toString() : '—'} />
-            <MetaRow label="Delay (Critical)" value="—" last />
+            <MetaRow label="Delay (Critical)" value="—" last={!isFpga} />
           </div>
+
+          {/* FPGA section — only when an FPGA target is selected */}
+          {isFpga && (
+            <>
+              <div style={{
+                marginTop: '14px',
+                paddingBottom: '4px',
+                fontSize: '9px',
+                letterSpacing: '1.5px',
+                color: 'var(--accent-primary)',
+                fontWeight: 600,
+                borderBottom: '1px solid var(--border-accent)',
+              }}>
+                FPGA SYNTHESIS
+              </div>
+              <div style={{ display: 'grid', gap: '0' }}>
+                <MetaRow label="Target" value={targetShort} />
+                <MetaRow label="LUTs" value={fmt(luts)} />
+                <MetaRow label="Flip-Flops" value={fmt(ffs)} />
+                <MetaRow label="Block RAM" value={fmt(bram)} />
+                <MetaRow label="DSPs" value={fmt(dsps)} />
+                <MetaRow label="Total Cells" value={fmt(synthResult?.total_cells || 0)} />
+                <MetaRow label="Wires" value={fmt(synthResult?.wires || 0)} last={!synthFailed} />
+              </div>
+              {synthFailed && (
+                <div style={{
+                  marginTop: '10px',
+                  padding: '6px 8px',
+                  border: '1px solid var(--error)',
+                  borderRadius: '3px',
+                  background: 'var(--error-bg)',
+                  color: 'var(--error)',
+                  fontSize: '10px',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: '4px' }}>Synthesis errors:</div>
+                  {synthResult.errors.map((e, i) => (
+                    <div key={i} style={{ marginBottom: '2px' }}>{e}</div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

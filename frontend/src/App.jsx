@@ -150,6 +150,13 @@ function App() {
   const [projectSearch, setProjectSearch] = useState('')
   const [symbolsCollapsed, setSymbolsCollapsed] = useState(false)
 
+  // Target (Icarus | iCE40 FPGA | ECP5 FPGA) drives whether SIM runs a
+  // simulation or kicks off Yosys FPGA synthesis.
+  const [target, setTarget] = useState('Icarus')
+  const [synthResult, setSynthResult] = useState(null)
+  const [synthesizing, setSynthesizing] = useState(false)
+  const [synthLog, setSynthLog] = useState([])  // [[level, text]]
+
   // Theme (persisted in localStorage)
   const [theme, setTheme] = useState(() => {
     try {
@@ -168,17 +175,28 @@ function App() {
   const generateControllerRef = useRef(null)
   const simulateControllerRef = useRef(null)
   const verifyControllerRef = useRef(null)
+  const synthControllerRef = useRef(null)
   const designEditorRef = useRef(null)
 
   // --- Derived meta from design code ---
   const { name: moduleName, portCount } = useMemo(() => parseDesignMeta(design), [design])
   const hasRealCode = (code) => code.replace(/\/\/.*$/gm, '').trim().length > 0
   const canSimulate = hasRealCode(design) && hasRealCode(testbench)
+  const canSynthesize = hasRealCode(design)
   const canVerify = hasRealCode(design)
   const isModified = design !== savedDesign
   const projectStatus = savedDesign !== DEFAULT_DESIGN
     ? (isModified ? 'Modified' : 'Saved')
     : ''
+
+  // Map UI label → backend target string
+  const targetCode = target === 'iCE40 FPGA' ? 'ice40'
+                    : target === 'ECP5 FPGA' ? 'ecp5'
+                    : null
+  const isFpgaTarget = targetCode !== null
+  const targetShortLabel = target === 'iCE40 FPGA' ? 'iCE40'
+                          : target === 'ECP5 FPGA' ? 'ECP5'
+                          : 'FPGA'
 
   // --- Handlers ---
 
@@ -267,6 +285,103 @@ function App() {
   }, [design, prompt])
 
   const handleCancelVerify = useCallback(() => { verifyControllerRef.current?.abort() }, [])
+
+  /** Cell-count helpers — handle both common iCE40 and ECP5 cell families. */
+  const countCells = (synth, names) => {
+    if (!synth?.cells) return 0
+    return names.reduce((sum, n) => sum + (synth.cells[n] || 0), 0)
+  }
+  const lutCount = (synth) => countCells(synth, [
+    'SB_LUT4', 'LUT4', 'LUT5', 'LUT6', 'TRELLIS_SLICE', 'CCU2C',
+  ])
+  const ffCount = (synth) => countCells(synth, [
+    'SB_DFF', 'SB_DFFE', 'SB_DFFR', 'SB_DFFS', 'SB_DFFSR', 'SB_DFFSS',
+    'SB_DFFER', 'SB_DFFES', 'SB_DFFESR', 'SB_DFFESS',
+    'TRELLIS_FF', 'DFF', 'DPRAM',
+  ])
+  const bramCount = (synth) => countCells(synth, [
+    'SB_RAM40_4K', 'SB_RAM40_4KNR', 'SB_RAM40_4KNW', 'SB_RAM40_4KNRNW',
+    'DP16KD', 'PDPW16KD',
+  ])
+  const dspCount = (synth) => countCells(synth, [
+    'SB_MAC16', 'MULT18X18D', 'MULT9X9D', 'MULT18X18',
+  ])
+
+  const handleSynthesize = useCallback(async () => {
+    if (!targetCode) return
+    const controller = new AbortController()
+    synthControllerRef.current = controller
+    setSynthesizing(true)
+    setError(null)
+    setCancelled(null)
+    setSynthResult(null)
+    setBottomTab('CONSOLE')
+
+    const startLog = [
+      ['info', `[SYNTH] Targeting ${targetShortLabel} FPGA...`],
+    ]
+    setSynthLog(startLog)
+
+    try {
+      const resp = await fetch(`${API_URL}/synthesize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ design_code: design, target: targetCode }),
+        signal: controller.signal,
+      })
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}))
+        throw new Error(d.detail || `HTTP ${resp.status}`)
+      }
+      const data = await resp.json()
+      setSynthResult(data)
+
+      const newLog = [...startLog]
+      if (data.success) {
+        newLog.push(['info', '[SYNTH] Synthesis complete.'])
+        const luts = lutCount(data)
+        const ffs = ffCount(data)
+        const bram = bramCount(data)
+        const dsps = dspCount(data)
+        newLog.push(['info', `[RESULT] LUTs: ${luts}, FFs: ${ffs}, BRAM: ${bram}, DSP: ${dsps}`])
+        newLog.push(['info', `[RESULT] Total cells: ${data.total_cells}, Wires: ${data.wires}`])
+      } else {
+        newLog.push(['error', '[SYNTH] Synthesis failed.'])
+      }
+      for (const w of data.warnings || []) {
+        newLog.push(['warn', `[WARN] ${w}`])
+      }
+      for (const e of data.errors || []) {
+        newLog.push(['error', `[ERROR] ${e}`])
+      }
+      setSynthLog(newLog)
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        setCancelled('synth')
+        setTimeout(() => setCancelled(null), 2000)
+      } else {
+        setError(e.message)
+        setSynthLog([...startLog, ['error', `[ERROR] ${e.message}`]])
+      }
+    } finally {
+      setSynthesizing(false)
+      synthControllerRef.current = null
+    }
+  }, [design, targetCode, targetShortLabel])
+
+  const handleCancelSynthesize = useCallback(() => {
+    synthControllerRef.current?.abort()
+  }, [])
+
+  // Reset synth state when the user switches target away from an FPGA, so
+  // the Context Panel and console don't show stale FPGA stats next to a
+  // freshly run simulation.
+  useEffect(() => {
+    if (!isFpgaTarget) {
+      setSynthResult(null)
+      setSynthLog([])
+    }
+  }, [isFpgaTarget])
 
   // Bottom panel height
   const handleBottomResize = useCallback((e) => {
@@ -404,8 +519,11 @@ function App() {
         onSimulate={handleSimulate}
         onCancelSimulate={handleCancelSimulate}
         simulating={simulating}
+        onSynthesize={handleSynthesize}
+        onCancelSynthesize={handleCancelSynthesize}
+        synthesizing={synthesizing}
         error={error}
-        hasResult={!!simResult}
+        hasResult={!!simResult || !!synthResult}
         onGenerate={handleGenerate}
         onCancelGenerate={handleCancelGenerate}
         generating={generating}
@@ -413,6 +531,7 @@ function App() {
         setPrompt={handlePromptChange}
         cancelled={cancelled}
         canSimulate={canSimulate}
+        canSynthesize={canSynthesize}
         onVerify={handleVerify}
         onCancelVerify={handleCancelVerify}
         verifying={verifying}
@@ -423,8 +542,20 @@ function App() {
         setProjectSearch={setProjectSearch}
         theme={theme}
         onToggleTheme={toggleTheme}
+        target={target}
+        setTarget={setTarget}
       />
       <ProgressIndicator active={generating} done={generateDone} />
+      <ProgressIndicator
+        active={synthesizing}
+        done={false}
+        steps={[
+          `Synthesizing for ${targetShortLabel}...`,
+          'Mapping to LUTs...',
+          'Counting resources...',
+        ]}
+        timings={[0, 2500, 6000]}
+      />
 
       {/* Middle: Left sidebar + Center + Right sidebar */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -536,10 +667,28 @@ function App() {
             <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
               {bottomTab === 'CONSOLE' && (
                 <div style={{ height: '100%', overflow: 'auto', padding: '6px 12px', fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-dim)' }}>
+                  {/* FPGA synthesis log (when target is an FPGA) */}
+                  {synthLog.length > 0 && (
+                    <div style={{ marginBottom: synthLog.length && (simResult?.stderr || simResult?.stdout) ? '10px' : 0 }}>
+                      {synthLog.map((entry, i) => {
+                        const [level, text] = entry
+                        const color = level === 'error' ? 'var(--error)'
+                                    : level === 'warn'  ? 'var(--warning)'
+                                    : 'var(--accent-secondary)'
+                        return (
+                          <div key={i} style={{ color, whiteSpace: 'pre-wrap' }}>{text}</div>
+                        )
+                      })}
+                    </div>
+                  )}
                   {simResult?.stderr && <pre style={{ color: 'var(--error)', whiteSpace: 'pre-wrap' }}>{simResult.stderr}</pre>}
                   {simResult?.stdout && <pre style={{ whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>{simResult.stdout}</pre>}
-                  {!simResult?.stderr && !simResult?.stdout && (
-                    <div style={{ color: 'var(--text-dim)', padding: '20px 0', textAlign: 'center' }}>Run a simulation to see console output</div>
+                  {!simResult?.stderr && !simResult?.stdout && synthLog.length === 0 && (
+                    <div style={{ color: 'var(--text-dim)', padding: '20px 0', textAlign: 'center' }}>
+                      {isFpgaTarget
+                        ? `Click SYNTH to synthesize for ${targetShortLabel}`
+                        : 'Run a simulation to see console output'}
+                    </div>
                   )}
                 </div>
               )}
@@ -646,6 +795,8 @@ function App() {
               moduleName={moduleName}
               portCount={portCount}
               gateCount={null}
+              target={target}
+              synthResult={synthResult}
             />
           </div>
         </div>

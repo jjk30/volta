@@ -1,19 +1,24 @@
 /**
- * Step-by-step generation progress display.
- * Shows pulsing green dot for current step, checkmarks for completed steps.
+ * Step-by-step progress display used during long-running tasks.
+ * Defaults to the generation pipeline; pass a custom `steps` array (e.g. for
+ * FPGA synthesis) plus matching `timings` (ms from start at which each step
+ * becomes the current one) to repurpose it.
  */
 
-const STEPS = [
+import { useState, useEffect, useRef } from 'react'
+
+const DEFAULT_STEPS = [
   'Interpreting design...',
   'Generating Verilog...',
   'Verifying with Yosys...',
   'Building testbench...',
   'Compiling...',
 ]
+const DEFAULT_TIMINGS = [0, 3000, 8000, 14000, 18000]
 
 // Estimate which step we're on based on elapsed time
 // Real backend doesn't stream progress, so we simulate based on typical timing
-function useProgressStep(active) {
+function useProgressStep(active, timings) {
   const [step, setStep] = useState(0)
   const startRef = useRef(null)
 
@@ -27,22 +32,21 @@ function useProgressStep(active) {
     startRef.current = Date.now()
     setStep(0)
 
-    // Advance steps on a schedule that matches typical backend timing
-    const timings = [0, 3000, 8000, 14000, 18000]
-    const timers = timings.map((delay, i) =>
+    const t = timings && timings.length ? timings : DEFAULT_TIMINGS
+    const timers = t.map((delay, i) =>
       setTimeout(() => setStep(i), delay)
     )
 
     return () => timers.forEach(clearTimeout)
-  }, [active])
+  }, [active, timings])
 
   return step
 }
 
-import { useState, useEffect, useRef } from 'react'
-
-export default function ProgressIndicator({ active, done }) {
-  const currentStep = useProgressStep(active)
+export default function ProgressIndicator({ active, done, steps, timings }) {
+  const stepLabels = steps && steps.length ? steps : DEFAULT_STEPS
+  const stepTimings = timings && timings.length ? timings : DEFAULT_TIMINGS
+  const currentStep = useProgressStep(active, stepTimings)
 
   if (!active && !done) return null
 
@@ -58,7 +62,7 @@ export default function ProgressIndicator({ active, done }) {
       fontFamily: "'JetBrains Mono', monospace",
       overflow: 'hidden',
     }}>
-      {STEPS.map((label, i) => {
+      {stepLabels.map((label, i) => {
         const isCompleted = done || (!active && i < currentStep) || (active && i < currentStep)
         const isCurrent = active && i === currentStep
         const isPending = active && i > currentStep
