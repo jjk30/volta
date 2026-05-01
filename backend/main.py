@@ -1389,43 +1389,90 @@ def _parse_module_name(code: str) -> Optional[str]:
 def _parse_yosys_stat(log: str) -> tuple[dict, int, int]:
     """Parse Yosys `stat` output. Returns (cells, total_cells, wires).
 
-    Looks for the LAST "=== ... ===" stat block (post-synthesis), then reads
-    `Number of wires`, `Number of cells`, and the indented cell-type lines
-    that follow.
+    Yosys produces multiple ``=== <module> ===`` blocks during a synth run
+    (one per module, plus a final aggregate). We walk the log looking for
+    the LAST block and read its summary lines.
+
+    The current Yosys stat format (used by recent releases) looks like:
+
+        === alu ===
+
+               26 wires
+               62 wire bits
+               33 cells
+                8   SB_CARRY
+               25   SB_LUT4
+
+    Older Yosys releases emitted a slightly different format with explicit
+    ``Number of wires:`` / ``Number of cells:`` prefixes. We accept both so
+    upgrades don't silently break the parser.
     """
     lines = log.splitlines()
-    # Find the last "=== <name> ===" stat header
+
+    # Find the LAST "=== <name> ===" stat header — this is the final summary
     last_header = -1
     for i, line in enumerate(lines):
         if re.match(r"^\s*===\s+\S+\s+===", line):
             last_header = i
     if last_header < 0:
+        print("[SYNTH] No stat header found in Yosys output")
         return {}, 0, 0
+
+    stat_block = lines[last_header:]
+    print(f"[SYNTH] Raw stat block ({len(stat_block)} lines):")
+    for sl in stat_block:
+        print(f"[SYNTH] | {sl}")
 
     cells: dict[str, int] = {}
     wires = 0
     total_cells = 0
     in_cells_block = False
 
-    for line in lines[last_header:]:
-        m = re.match(r"\s*Number of wires:\s+(\d+)", line)
+    # Cell-line patterns. Yosys puts the count BEFORE the cell name with at
+    # least two spaces separating them, e.g. "        8   SB_CARRY".
+    cell_line_new = re.compile(r"^\s+(\d+)\s{2,}([A-Za-z_][\w$]*)\s*$")
+    cell_line_old = re.compile(r"^\s+([A-Za-z_][\w$]*)\s+(\d+)\s*$")
+
+    wires_new = re.compile(r"^\s+(\d+)\s+wires\s*$")
+    cells_new = re.compile(r"^\s+(\d+)\s+cells\s*$")
+    wires_old = re.compile(r"\s*Number of wires:\s+(\d+)")
+    cells_old = re.compile(r"\s*Number of cells:\s+(\d+)")
+
+    for line in stat_block:
+        # Stop if we hit the next === block or an end marker
+        if line.startswith("End of script"):
+            break
+
+        m = wires_new.match(line) or wires_old.match(line)
         if m:
             wires = int(m.group(1))
             continue
-        m = re.match(r"\s*Number of cells:\s+(\d+)", line)
+
+        m = cells_new.match(line) or cells_old.match(line)
         if m:
             total_cells = int(m.group(1))
             in_cells_block = True
             continue
+
         if in_cells_block:
-            # Cell-type lines look like "    SB_LUT4              5"
-            m = re.match(r"\s+([A-Za-z_][\w$]*)\s+(\d+)\s*$", line)
+            # Try the new format first (count first, name second)
+            m = cell_line_new.match(line)
+            if m:
+                cells[m.group(2)] = int(m.group(1))
+                continue
+            # Fall back to old format (name first, count second)
+            m = cell_line_old.match(line)
             if m:
                 cells[m.group(1)] = int(m.group(2))
-            elif line.strip() and not line.startswith(" "):
-                # Reached the next section
-                in_cells_block = False
+                continue
+            # Blank line inside the block is OK — keep scanning
+            if not line.strip():
+                continue
+            # Anything else means we've left the cells listing
+            in_cells_block = False
 
+    print(f"[SYNTH] Parsed cells: {cells}")
+    print(f"[SYNTH] Parsed total_cells={total_cells}, wires={wires}")
     return cells, total_cells, wires
 
 
@@ -1468,8 +1515,9 @@ async def synthesize(req: SynthesizeRequest):
         script = f"read_verilog {design_path}; {synth_pass} -top {module_name}; stat"
 
         try:
+            # Run without -q so the stat block prints to stdout for our parser
             result = subprocess.run(
-                ["yosys", "-q", "-p", script],
+                ["yosys", "-p", script],
                 capture_output=True, text=True, timeout=60,
                 cwd=work_dir,
             )
