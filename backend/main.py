@@ -1350,6 +1350,165 @@ async def verify(req: VerifyRequest):
     )
 
 
+# ---------------------------------------------------------------------------
+# Synthesize endpoint — Yosys FPGA synthesis (iCE40 / ECP5 / generic)
+# ---------------------------------------------------------------------------
+
+class SynthesizeRequest(BaseModel):
+    design_code: str
+    target: str = "ice40"  # "ice40" | "ecp5" | "generic"
+
+
+class SynthesizeResponse(BaseModel):
+    success: bool
+    target: str
+    module_name: str
+    cells: dict           # {cell_type_name: count}
+    total_cells: int
+    wires: int
+    warnings: list[str] = []
+    errors: list[str] = []
+    raw_log: str = ""
+
+
+# Yosys synth pass per FPGA family. -top is appended at runtime when the
+# module name is known.
+_SYNTH_COMMANDS = {
+    "ice40": "synth_ice40",
+    "ecp5": "synth_ecp5",
+    "generic": "synth",
+}
+
+
+def _parse_module_name(code: str) -> Optional[str]:
+    """Extract the first module name from the design code, or None."""
+    m = re.search(r"\bmodule\s+(\w+)", code)
+    return m.group(1) if m else None
+
+
+def _parse_yosys_stat(log: str) -> tuple[dict, int, int]:
+    """Parse Yosys `stat` output. Returns (cells, total_cells, wires).
+
+    Looks for the LAST "=== ... ===" stat block (post-synthesis), then reads
+    `Number of wires`, `Number of cells`, and the indented cell-type lines
+    that follow.
+    """
+    lines = log.splitlines()
+    # Find the last "=== <name> ===" stat header
+    last_header = -1
+    for i, line in enumerate(lines):
+        if re.match(r"^\s*===\s+\S+\s+===", line):
+            last_header = i
+    if last_header < 0:
+        return {}, 0, 0
+
+    cells: dict[str, int] = {}
+    wires = 0
+    total_cells = 0
+    in_cells_block = False
+
+    for line in lines[last_header:]:
+        m = re.match(r"\s*Number of wires:\s+(\d+)", line)
+        if m:
+            wires = int(m.group(1))
+            continue
+        m = re.match(r"\s*Number of cells:\s+(\d+)", line)
+        if m:
+            total_cells = int(m.group(1))
+            in_cells_block = True
+            continue
+        if in_cells_block:
+            # Cell-type lines look like "    SB_LUT4              5"
+            m = re.match(r"\s+([A-Za-z_][\w$]*)\s+(\d+)\s*$", line)
+            if m:
+                cells[m.group(1)] = int(m.group(2))
+            elif line.strip() and not line.startswith(" "):
+                # Reached the next section
+                in_cells_block = False
+
+    return cells, total_cells, wires
+
+
+def _split_log_messages(log: str) -> tuple[list[str], list[str]]:
+    """Pull warning/error lines out of the raw Yosys log."""
+    warnings: list[str] = []
+    errors: list[str] = []
+    for raw in log.splitlines():
+        line = raw.strip()
+        # Yosys prefixes most diagnostics with "Warning:" or "ERROR:"
+        if line.lower().startswith("warning:"):
+            warnings.append(line)
+        elif line.lower().startswith("error:") or line.startswith("ERROR:"):
+            errors.append(line)
+    return warnings, errors
+
+
+@app.post("/synthesize", response_model=SynthesizeResponse)
+async def synthesize(req: SynthesizeRequest):
+    """Run Yosys FPGA synthesis and return a cell/wire breakdown."""
+
+    if not req.design_code.strip():
+        raise HTTPException(status_code=400, detail="Design code is empty")
+
+    target = req.target.lower()
+    if target not in _SYNTH_COMMANDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown target '{req.target}'. Expected ice40, ecp5, or generic.",
+        )
+
+    module_name = _parse_module_name(req.design_code) or "top"
+
+    with tempfile.TemporaryDirectory(prefix="volta_synth_") as work_dir:
+        design_path = os.path.join(work_dir, "design.v")
+        with open(design_path, "w") as f:
+            f.write(req.design_code)
+
+        synth_pass = _SYNTH_COMMANDS[target]
+        script = f"read_verilog {design_path}; {synth_pass} -top {module_name}; stat"
+
+        try:
+            result = subprocess.run(
+                ["yosys", "-q", "-p", script],
+                capture_output=True, text=True, timeout=60,
+                cwd=work_dir,
+            )
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=500,
+                detail="Yosys is not installed. Install it with: brew install yosys",
+            )
+        except subprocess.TimeoutExpired:
+            return SynthesizeResponse(
+                success=False,
+                target=target,
+                module_name=module_name,
+                cells={},
+                total_cells=0,
+                wires=0,
+                warnings=[],
+                errors=[f"Synthesis timed out after 60s for target '{target}'"],
+                raw_log="",
+            )
+
+        raw_log = (result.stdout or "") + (result.stderr or "")
+        cells, total_cells, wires = _parse_yosys_stat(raw_log)
+        warnings, errors = _split_log_messages(raw_log)
+
+        success = result.returncode == 0 and not errors
+        return SynthesizeResponse(
+            success=success,
+            target=target,
+            module_name=module_name,
+            cells=cells,
+            total_cells=total_cells,
+            wires=wires,
+            warnings=warnings,
+            errors=errors,
+            raw_log=raw_log,
+        )
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}

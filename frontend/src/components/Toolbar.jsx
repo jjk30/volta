@@ -27,12 +27,14 @@ function makeSelectStyle(theme) {
 
 export default function Toolbar({
   onSimulate, onCancelSimulate, simulating,
+  onSynthesize, onCancelSynthesize, synthesizing,
   error, hasResult,
   onGenerate, onCancelGenerate, generating,
   onVerify, onCancelVerify, verifying,
   prompt, setPrompt,
   cancelled,
   canSimulate = true,
+  canSynthesize = true,
   canVerify = false,
   projectName = 'untitled',
   projectStatus = '',
@@ -40,6 +42,8 @@ export default function Toolbar({
   setProjectSearch = () => {},
   theme = 'dark',
   onToggleTheme = () => {},
+  target = 'Icarus',
+  setTarget = () => {},
 }) {
 
   const handleGenerate = () => {
@@ -139,10 +143,17 @@ export default function Toolbar({
         <option disabled>C++ (SystemC)</option>
       </select>
 
-      <select defaultValue="Icarus Verilog" style={selectStyle}>
-        <option value="Icarus Verilog">Icarus</option>
-        <option disabled>Verilator</option>
-        <option disabled>Yosys</option>
+      {/* Target dropdown — drives whether SIM runs simulation or FPGA synthesis */}
+      <select
+        value={target}
+        onChange={(e) => setTarget(e.target.value)}
+        style={{ ...selectStyle, width: '110px' }}
+        title="Target (simulator or synthesis target)"
+      >
+        <option value="Icarus">Icarus</option>
+        <option value="iCE40 FPGA">iCE40 FPGA</option>
+        <option value="ECP5 FPGA">ECP5 FPGA</option>
+        <option disabled>Verilator (soon)</option>
       </select>
 
       <select defaultValue="None" style={selectStyle}>
@@ -208,16 +219,29 @@ export default function Toolbar({
         />
       )}
 
-      {/* Simulate button */}
-      {simulating ? (
-        <CancelButton onClick={onCancelSimulate} />
+      {/* Simulate / Synthesize button — switches based on target */}
+      {target === 'Icarus' ? (
+        simulating ? (
+          <CancelButton onClick={onCancelSimulate} />
+        ) : (
+          <ActionButton
+            onClick={onSimulate}
+            disabled={!canSimulate}
+            label="SIM"
+            prefix={<span style={{ fontSize: '10px' }}>&#9654;</span>}
+          />
+        )
       ) : (
-        <ActionButton
-          onClick={onSimulate}
-          disabled={!canSimulate}
-          label="SIM"
-          prefix={<span style={{ fontSize: '10px' }}>&#9654;</span>}
-        />
+        synthesizing ? (
+          <CancelButton onClick={onCancelSynthesize} />
+        ) : (
+          <ActionButton
+            onClick={onSynthesize}
+            disabled={!canSynthesize}
+            label="SYNTH"
+            prefix={<span style={{ fontSize: '10px' }}>&#9881;</span>}
+          />
+        )
       )}
 
       {/* Verify button */}
