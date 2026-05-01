@@ -903,89 +903,135 @@ const HILITE = 'var(--schematic-highlight)'
 const ERR = 'var(--schematic-error)'
 const MUTED = 'var(--text-dim)'
 
+// Gate symbols are 70 × 45 (per the spec) so they can sit visually inside the
+// 200-wide component column without crowding. External pins are at the same
+// horizontal extent as the gate body so wires terminate cleanly.
+const GATE_W = 70
+const GATE_H = 45
+
 function gatePinLayout(gateType) {
   switch (gateType) {
     case 'NOT':
-      return { in: [{ x: -40, y: 0 }], out: { x: 40, y: 0 } }
+      return { in: [{ x: -GATE_W / 2, y: 0 }], out: { x: GATE_W / 2, y: 0 } }
     case 'MUX':
-      return { in: [{ x: -40, y: -15 }, { x: -40, y: 15 }, { x: 0, y: 30 }], out: { x: 40, y: 0 } }
+      return {
+        in: [
+          { x: -GATE_W / 2, y: -12 },
+          { x: -GATE_W / 2, y: 12 },
+          { x: 0, y: GATE_H / 2 + 8 },
+        ],
+        out: { x: GATE_W / 2, y: 0 },
+      }
     default:
-      return { in: [{ x: -40, y: -10 }, { x: -40, y: 10 }], out: { x: 40, y: 0 } }
+      return {
+        in: [{ x: -GATE_W / 2, y: -10 }, { x: -GATE_W / 2, y: 10 }],
+        out: { x: GATE_W / 2, y: 0 },
+      }
   }
 }
 
 function GateGlyph({ type, label, color = ACCENT }) {
   const common = { stroke: color, strokeWidth: 2, fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' }
   const stub = (x1, y1, x2, y2) => <line x1={x1} y1={y1} x2={x2} y2={y2} {...common} />
+  const lx = -GATE_W / 2
+  const rx = GATE_W / 2
 
   switch (type) {
     case 'AND': return <>
-      <path d="M -25 -20 L -5 -20 A 20 20 0 0 1 -5 20 L -25 20 Z" {...common} />
-      {stub(-40, -10, -25, -10)}{stub(-40, 10, -25, 10)}{stub(15, 0, 40, 0)}
+      <path d="M -28 -17 L -10 -17 A 17 17 0 0 1 -10 17 L -28 17 Z" {...common} />
+      {stub(lx, -10, -28, -10)}{stub(lx, 10, -28, 10)}{stub(7, 0, rx, 0)}
     </>
     case 'NAND': return <>
-      <path d="M -25 -20 L -8 -20 A 20 20 0 0 1 -8 20 L -25 20 Z" {...common} />
-      <circle cx="15" cy="0" r="4" {...common} />
-      {stub(-40, -10, -25, -10)}{stub(-40, 10, -25, 10)}{stub(19, 0, 40, 0)}
+      <path d="M -28 -17 L -13 -17 A 17 17 0 0 1 -13 17 L -28 17 Z" {...common} />
+      <circle cx="11" cy="0" r="4" {...common} />
+      {stub(lx, -10, -28, -10)}{stub(lx, 10, -28, 10)}{stub(15, 0, rx, 0)}
     </>
     case 'OR': return <>
-      <path d="M -25 -20 Q -5 0 -25 20 Q 0 20 15 0 Q 0 -20 -25 -20 Z" {...common} />
-      {stub(-40, -10, -20, -10)}{stub(-40, 10, -20, 10)}{stub(15, 0, 40, 0)}
+      <path d="M -28 -17 Q -8 0 -28 17 Q -3 17 18 0 Q -3 -17 -28 -17 Z" {...common} />
+      {stub(lx, -10, -22, -10)}{stub(lx, 10, -22, 10)}{stub(18, 0, rx, 0)}
     </>
     case 'NOR': return <>
-      <path d="M -25 -20 Q -5 0 -25 20 Q 0 20 11 0 Q 0 -20 -25 -20 Z" {...common} />
-      <circle cx="15" cy="0" r="4" {...common} />
-      {stub(-40, -10, -20, -10)}{stub(-40, 10, -20, 10)}{stub(19, 0, 40, 0)}
+      <path d="M -28 -17 Q -8 0 -28 17 Q -3 17 14 0 Q -3 -17 -28 -17 Z" {...common} />
+      <circle cx="18" cy="0" r="4" {...common} />
+      {stub(lx, -10, -22, -10)}{stub(lx, 10, -22, 10)}{stub(22, 0, rx, 0)}
     </>
     case 'XOR': return <>
-      <path d="M -29 -20 Q -9 0 -29 20" {...common} />
-      <path d="M -24 -20 Q -4 0 -24 20 Q 1 20 15 0 Q 1 -20 -24 -20 Z" {...common} />
-      {stub(-40, -10, -19, -10)}{stub(-40, 10, -19, 10)}{stub(15, 0, 40, 0)}
+      <path d="M -32 -17 Q -12 0 -32 17" {...common} />
+      <path d="M -27 -17 Q -7 0 -27 17 Q -2 17 18 0 Q -2 -17 -27 -17 Z" {...common} />
+      {stub(lx, -10, -22, -10)}{stub(lx, 10, -22, 10)}{stub(18, 0, rx, 0)}
     </>
     case 'XNOR': return <>
-      <path d="M -29 -20 Q -9 0 -29 20" {...common} />
-      <path d="M -24 -20 Q -4 0 -24 20 Q 1 20 11 0 Q 1 -20 -24 -20 Z" {...common} />
-      <circle cx="15" cy="0" r="4" {...common} />
-      {stub(-40, -10, -19, -10)}{stub(-40, 10, -19, 10)}{stub(19, 0, 40, 0)}
+      <path d="M -32 -17 Q -12 0 -32 17" {...common} />
+      <path d="M -27 -17 Q -7 0 -27 17 Q -2 17 14 0 Q -2 -17 -27 -17 Z" {...common} />
+      <circle cx="18" cy="0" r="4" {...common} />
+      {stub(lx, -10, -22, -10)}{stub(lx, 10, -22, 10)}{stub(22, 0, rx, 0)}
     </>
     case 'NOT': return <>
-      <polygon points="-25,-20 14,0 -25,20" {...common} />
-      <circle cx="18" cy="0" r="4" {...common} />
-      {stub(-40, 0, -25, 0)}{stub(22, 0, 40, 0)}
+      <polygon points="-25,-17 12,0 -25,17" {...common} />
+      <circle cx="16" cy="0" r="4" {...common} />
+      {stub(lx, 0, -25, 0)}{stub(20, 0, rx, 0)}
     </>
     case 'MUX': return <>
-      <polygon points="-22,-25 22,-15 22,15 -22,25" {...common} />
-      <text x="0" y="4" textAnchor="middle" fill={color} fontSize="9" fontFamily="'JetBrains Mono',monospace">MUX</text>
-      <text x="-17" y="-10" textAnchor="start" fill={color} fontSize="7" fontFamily="'JetBrains Mono',monospace">0</text>
-      <text x="-17" y="18" textAnchor="start" fill={color} fontSize="7" fontFamily="'JetBrains Mono',monospace">1</text>
-      <text x="0" y="38" textAnchor="middle" fill={color} fontSize="7" fontFamily="'JetBrains Mono',monospace">sel</text>
-      {stub(-40, -15, -22, -15)}{stub(-40, 15, -22, 15)}{stub(0, 30, 0, 25)}{stub(22, 0, 40, 0)}
+      <polygon points="-24,-20 22,-12 22,12 -24,20" {...common} />
+      <text x="0" y="4" textAnchor="middle" fill={color}
+        fontSize="10" fontWeight="600" fontFamily="'JetBrains Mono',monospace">MUX</text>
+      <text x="-19" y="-8" textAnchor="start" fill={color}
+        fontSize="8" fontFamily="'JetBrains Mono',monospace">0</text>
+      <text x="-19" y="16" textAnchor="start" fill={color}
+        fontSize="8" fontFamily="'JetBrains Mono',monospace">1</text>
+      <text x="0" y={GATE_H / 2 + 14} textAnchor="middle" fill={color}
+        fontSize="8" fontFamily="'JetBrains Mono',monospace">sel</text>
+      {stub(lx, -12, -24, -12)}{stub(lx, 12, -24, 12)}
+      {stub(0, GATE_H / 2 + 8, 0, 20)}{stub(22, 0, rx, 0)}
     </>
     default: return (
       <>
-        <rect x="-25" y="-20" width="50" height="40" rx="2" {...common} />
-        <text x="0" y="5" textAnchor="middle" fill={color} fontSize="9" fontFamily="'JetBrains Mono',monospace">{label || type}</text>
-        {stub(-40, -10, -25, -10)}{stub(-40, 10, -25, 10)}{stub(25, 0, 40, 0)}
+        <rect x="-28" y="-17" width="56" height="34" rx="3" {...common} />
+        <text x="0" y="4" textAnchor="middle" fill={color}
+          fontSize="10" fontWeight="600" fontFamily="'JetBrains Mono',monospace">{label || type}</text>
+        {stub(lx, -10, -28, -10)}{stub(lx, 10, -28, 10)}{stub(28, 0, rx, 0)}
       </>
     )
   }
 }
 
-/** Generic rounded-rect functional block used by most non-gate components.
- *  Width/height adapt to input count. Returns { body, pinLayout } */
+// All non-gate components share the same physical box: 200px wide, with a
+// height that scales with the larger of input or output count.
+const BLOCK_W = 200
+
+function functionalBlockHeight(inputs, outputs, hasOps) {
+  const portCount = Math.max(inputs.length, outputs.length, 1)
+  const portSpacing = portCount > 6 ? 30 : 40
+  const headerHeight = 30 + (hasOps ? 22 : 0)   // title + optional ops row
+  const bottomPad = 15
+  return Math.max(150, headerHeight + portCount * portSpacing + bottomPad)
+}
+
+/** Generic rounded-rect functional block used by every non-gate component.
+ *
+ *  Width is fixed at 200px. Height scales with port count (40px per port,
+ *  dropping to 30px when there are more than 6 ports per side). The title
+ *  sits at the top in bold, an optional `ops` row holds operation labels for
+ *  ALU-like blocks, and port labels are rendered INSIDE the box (10px in
+ *  from each edge) so wires terminate at the box edge cleanly with no
+ *  overlap between the label and the wire/dot.
+ */
 function FunctionalBlock({
-  title, subtitle, inputs, outputs, color = ACCENT, w, h, hatch = false, extra,
+  title, subtitle, ops, inputs, outputs, color = ACCENT, hatch = false, extra,
 }) {
-  const common = { stroke: color, strokeWidth: 2, fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' }
+  const w = BLOCK_W
+  const h = functionalBlockHeight(inputs, outputs, !!ops)
   const left = -w / 2, right = w / 2, top = -h / 2, bottom = h / 2
 
-  const inCount = Math.max(1, inputs.length)
-  const inStep = (h - 20) / (inCount + 1)
-  const inYs = inputs.map((_, i) => top + 10 + (i + 1) * inStep)
+  // Layout regions: header (title + optional ops) | port band | bottom pad.
+  const headerHeight = 30 + (ops ? 22 : 0)
+  const portTop = top + headerHeight
+  const portBand = (bottom - 15) - portTop
 
-  const outCount = Math.max(1, outputs.length)
-  const outStep = (h - 20) / (outCount + 1)
-  const outYs = outputs.map((_, i) => top + 10 + (i + 1) * outStep)
+  // Centre each port group within its half of the box. Inputs and outputs
+  // are spaced independently so they don't have to line up.
+  const inYs = inputs.map((_, i) => portTop + (portBand / (inputs.length + 1)) * (i + 1))
+  const outYs = outputs.map((_, i) => portTop + (portBand / (outputs.length + 1)) * (i + 1))
 
   const pinsIn = inputs.map((port, i) => ({
     port, x: left, y: inYs[i], side: 'left',
@@ -994,53 +1040,78 @@ function FunctionalBlock({
     port, x: right, y: outYs[i], side: 'right',
   }))
 
+  // The unique hatch-pattern id avoids duplicates when multiple memory
+  // blocks render in the same SVG.
+  const hatchId = hatch ? `hatch-${title}-${inputs.length}-${outputs.length}` : null
+
   return {
     pinList: { in: pinsIn, out: pinsOut },
+    w, h,
     body: (
       <>
-        {hatch && <HatchPattern id="hatch" color={color} />}
+        {hatchId && <HatchPattern id={hatchId} color={color} />}
         <rect
-          x={left} y={top} width={w} height={h} rx={4} ry={4}
+          x={left} y={top} width={w} height={h} rx={6} ry={6}
           stroke={color} strokeWidth={2}
-          fill={hatch ? 'url(#hatch)' : 'none'}
+          fill={hatchId ? `url(#${hatchId})` : 'none'}
         />
 
-        {/* Title */}
-        <text x="0" y={top + 14} textAnchor="middle" fill={color}
-          fontSize="11" fontWeight="600" fontFamily="'JetBrains Mono',monospace">
+        {/* Title — bold, 13px, baseline 20px below top */}
+        <text x={0} y={top + 20} textAnchor="middle" fill={color}
+          fontSize="13" fontWeight="700"
+          fontFamily="'JetBrains Mono', monospace">
           {title}
         </text>
         {subtitle && (
-          <text x="0" y={top + 26} textAnchor="middle" fill={color}
-            fontSize="8" fontFamily="'JetBrains Mono',monospace" opacity="0.7">
+          <text x={0} y={top + 34} textAnchor="middle" fill={color}
+            fontSize="9" opacity="0.65"
+            fontFamily="'JetBrains Mono', monospace">
             {subtitle}
           </text>
         )}
 
-        {/* Input pins + labels */}
+        {/* Optional operation list (ALU/MUX/decoder) — 9px, dedicated row,
+            sits ABOVE the port labels so it never overlaps them. */}
+        {ops && (
+          <text x={0} y={top + headerHeight - 6} textAnchor="middle" fill={color}
+            fontSize="9" opacity="0.85"
+            fontFamily="'JetBrains Mono', monospace">
+            {ops}
+          </text>
+        )}
+
+        {/* Input port labels — INSIDE the box, left-aligned with 10px padding */}
         {pinsIn.map((pin, i) => (
-          <g key={`in-${i}`}>
-            <line x1={pin.x - 6} y1={pin.y} x2={pin.x} y2={pin.y} {...common} />
+          <g key={`pin-i-${i}`}>
             {pin.port.isClock && (
-              <polyline points={`${pin.x},${pin.y - 4} ${pin.x + 6},${pin.y} ${pin.x},${pin.y + 4}`}
+              <polyline
+                points={`${left + 2},${pin.y - 4} ${left + 9},${pin.y} ${left + 2},${pin.y + 4}`}
                 stroke={color} strokeWidth="1.5" fill="none" />
             )}
-            <text x={pin.x + 8} y={pin.y + 3} textAnchor="start" fill={color}
-              fontSize="8" fontFamily="'JetBrains Mono',monospace">
+            <text
+              x={left + (pin.port.isClock ? 14 : 10)}
+              y={pin.y + 3}
+              textAnchor="start"
+              fill={color}
+              fontSize="10"
+              fontFamily="'JetBrains Mono', monospace">
               {pin.port.label}
             </text>
           </g>
         ))}
 
-        {/* Output pins + labels */}
+        {/* Output port labels — INSIDE the box, right-aligned with 10px padding */}
         {pinsOut.map((pin, i) => (
-          <g key={`out-${i}`}>
-            <line x1={pin.x} y1={pin.y} x2={pin.x + 6} y2={pin.y} {...common} />
-            <text x={pin.x - 8} y={pin.y + 3} textAnchor="end" fill={color}
-              fontSize="8" fontFamily="'JetBrains Mono',monospace">
-              {pin.port.label}
-            </text>
-          </g>
+          <text
+            key={`pin-o-${i}`}
+            x={right - 10}
+            y={pin.y + 3}
+            textAnchor="end"
+            fill={color}
+            fontSize="10"
+            fontFamily="'JetBrains Mono', monospace">
+            {pin.port.label}
+          </text>
         ))}
 
         {extra}
@@ -1075,7 +1146,8 @@ function renderComponent(comp, opts = {}) {
           }).concat(comp.sel && pins.in.length > 2 ? [{ port: { name: comp.sel, label: 'sel' }, x: pins.in[2].x, y: pins.in[2].y, side: 'bottom' }] : []),
           out: [{ port: comp.outputs[0], x: pins.out.x, y: pins.out.y, side: 'right' }],
         },
-        w: 80, h: 50,
+        w: GATE_W, h: GATE_H,
+        gateType: comp.gateType,
       }
     }
 
@@ -1086,167 +1158,141 @@ function renderComponent(comp, opts = {}) {
         glyph: <GateGlyph type="MUX" color={color} />,
         pinList: {
           in: (comp.inputs || []).map((port, i) => ({
-            port, x: pins.in[i]?.x || -40, y: pins.in[i]?.y || 0, side: 'left',
+            port, x: pins.in[i]?.x || -GATE_W / 2, y: pins.in[i]?.y || 0, side: 'left',
           })).concat(comp.sel
             ? [{ port: { name: comp.sel, label: 'sel' }, x: pins.in[2].x, y: pins.in[2].y, side: 'bottom' }]
             : []),
           out: [{ port: comp.outputs[0], x: pins.out.x, y: pins.out.y, side: 'right' }],
         },
-        w: 80, h: 60,
+        w: GATE_W, h: GATE_H + 16,    // taller to fit the sel pin on bottom
+        gateType: 'MUX',
       }
     }
 
     case 'DFF': {
       const block = FunctionalBlock({
-        title: 'DFF', inputs: comp.inputs, outputs: comp.outputs, color, w: 90, h: 70,
+        title: 'DFF', inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 90, h: 70 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'REGISTER': {
       const block = FunctionalBlock({
-        title: 'REG', inputs: comp.inputs, outputs: comp.outputs, color, w: 100, h: 90,
+        title: 'REG', inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 100, h: 90 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'COUNTER': {
-      const extra = (
-        <text x="0" y="10" textAnchor="middle" fill={color}
-          fontSize="9" fontFamily="'JetBrains Mono',monospace" opacity="0.8">
-          +{comp.delta || 1}
-        </text>
-      )
       const block = FunctionalBlock({
-        title: 'CTR', subtitle: 'counter', inputs: comp.inputs, outputs: comp.outputs,
-        color, w: 100, h: 90, extra,
+        title: 'CTR', subtitle: `counter (+${comp.delta || 1})`,
+        inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 100, h: 90 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'SHIFT_REG': {
-      const extra = (
-        <text x="0" y="10" textAnchor="middle" fill={color}
-          fontSize="14" fontFamily="'JetBrains Mono',monospace" opacity="0.75">
-          {comp.direction === 'left' ? '◀' : '▶'}
-        </text>
-      )
+      const arrow = comp.direction === 'left' ? '◀' : '▶'
       const block = FunctionalBlock({
-        title: 'SHIFT REG', inputs: comp.inputs, outputs: comp.outputs,
-        color, w: 120, h: 90, extra,
+        title: 'SHIFT REG', subtitle: `shift ${arrow}`,
+        inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 120, h: 90 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'ALU': {
-      const opsText = (comp.operations || []).slice(0, 6).join(' | ')
-      // Inputs: data inputs on left; sel on bottom
-      const h = Math.max(90, 30 + (comp.inputs.length + 1) * 18)
-      const w = 140
-      const left = -w / 2, right = w / 2, top = -h / 2
-      const dataYs = comp.inputs.map((_, i) => top + 25 + i * 18)
-      const pinsIn = comp.inputs.map((port, i) => ({ port, x: left, y: dataYs[i], side: 'left' }))
-      const selPin = { port: { name: comp.selName || comp.sel, label: comp.selLabel || 'OP' }, x: 0, y: top + h + 0, side: 'bottom' }
-      // draw sel on the bottom
-      const outY = 0
-      const pinsOut = comp.outputs.map((port, i) => ({ port, x: right, y: outY + (i - (comp.outputs.length - 1) / 2) * 18, side: 'right' }))
+      // ALU uses the same FunctionalBlock shape (200×dynamic) but adds an
+      // extra input on the bottom for the OP / select signal. Operations
+      // are listed in the dedicated `ops` row above the port labels.
+      const opList = comp.operations || []
+      const opsRow = opList.length <= 4
+        ? opList.join(' | ')
+        : opList.slice(0, 4).join(' | ') + ' | ...'
+      const selInput = {
+        name: comp.selName || comp.sel || 'sel',
+        label: comp.selLabel || 'OP',
+      }
 
+      const block = FunctionalBlock({
+        title: 'ALU', ops: opsRow,
+        inputs: comp.inputs, outputs: comp.outputs, color,
+      })
+      // Add the sel pin on the bottom edge — the select signal enters
+      // from below, perpendicular to the data inputs.
+      const selPin = {
+        port: selInput,
+        x: 0, y: block.h / 2, side: 'bottom',
+      }
+      const selStub = (
+        <g>
+          <line x1={0} y1={block.h / 2 - 12} x2={0} y2={block.h / 2}
+            stroke={color} strokeWidth="2" />
+          <text x={0} y={block.h / 2 - 16} textAnchor="middle" fill={color}
+            fontSize="10" fontFamily="'JetBrains Mono', monospace">
+            {selInput.label}
+          </text>
+        </g>
+      )
       return {
-        glyph: (
-          <>
-            <polygon
-              points={`${left},${top} ${right - 20},${top} ${right},0 ${right - 20},${-top} ${left},${-top} ${left + 20},0`}
-              stroke={color} strokeWidth="2" fill="none"
-            />
-            <text x="0" y={top + 16} textAnchor="middle" fill={color}
-              fontSize="11" fontWeight="600" fontFamily="'JetBrains Mono',monospace">
-              ALU
-            </text>
-            <text x="0" y={top + 30} textAnchor="middle" fill={color}
-              fontSize="7" fontFamily="'JetBrains Mono',monospace" opacity="0.75">
-              {opsText}
-            </text>
-            {pinsIn.map((pin, i) => (
-              <g key={`alu-i-${i}`}>
-                <line x1={pin.x - 6} y1={pin.y} x2={pin.x} y2={pin.y} stroke={color} strokeWidth="2" />
-                <text x={pin.x + 8} y={pin.y + 3} textAnchor="start" fill={color}
-                  fontSize="8" fontFamily="'JetBrains Mono',monospace">{pin.port.label}</text>
-              </g>
-            ))}
-            {pinsOut.map((pin, i) => (
-              <g key={`alu-o-${i}`}>
-                <line x1={pin.x} y1={pin.y} x2={pin.x + 6} y2={pin.y} stroke={color} strokeWidth="2" />
-                <text x={pin.x - 8} y={pin.y + 3} textAnchor="end" fill={color}
-                  fontSize="8" fontFamily="'JetBrains Mono',monospace">{pin.port.label}</text>
-              </g>
-            ))}
-            {/* Sel pin on bottom */}
-            <g>
-              <line x1="0" y1={-top} x2="0" y2={-top + 8} stroke={color} strokeWidth="2" />
-              <text x="0" y={-top + 18} textAnchor="middle" fill={color}
-                fontSize="8" fontFamily="'JetBrains Mono',monospace">{comp.selLabel || 'OP'}</text>
-            </g>
-          </>
-        ),
+        glyph: <>{block.body}{selStub}</>,
         pinList: {
-          in: [...pinsIn, { port: { name: comp.selName || comp.sel || 'sel', label: 'OP' }, x: 0, y: -top, side: 'bottom' }],
-          out: pinsOut,
+          in: [...block.pinList.in, selPin],
+          out: block.pinList.out,
         },
-        w, h,
+        w: block.w, h: block.h,
       }
     }
 
     case 'COMPARATOR': {
       const block = FunctionalBlock({
         title: 'CMP', subtitle: 'comparator',
-        inputs: comp.inputs, outputs: comp.outputs,
-        color, w: 110, h: Math.max(80, 20 + (comp.outputs.length + 1) * 18),
+        inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 110, h: Math.max(80, 20 + (comp.outputs.length + 1) * 18) }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'DECODER': {
       const block = FunctionalBlock({
-        title: `DEC 1:${comp.decSize || 'N'}`, inputs: comp.inputs, outputs: comp.outputs,
-        color, w: 110, h: Math.max(90, 20 + (comp.outputs.length + 1) * 14),
+        title: `DEC 1:${comp.decSize || 'N'}`,
+        inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 110, h: Math.max(90, 20 + (comp.outputs.length + 1) * 14) }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'ENCODER': {
       const block = FunctionalBlock({
         title: comp.encType ? `${comp.encType.toUpperCase()} ENC` : 'ENC',
         subtitle: 'encoder',
-        inputs: comp.inputs, outputs: comp.outputs, color, w: 130, h: 80,
+        inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 130, h: 80 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'MUX_BLOCK': {
       const block = FunctionalBlock({
         title: 'MUX',
         inputs: [...comp.inputs, { name: comp.sel, label: comp.selLabel || 'SEL' }],
-        outputs: comp.outputs, color, w: 110, h: Math.max(80, 20 + (comp.inputs.length + 1) * 18),
+        outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 110, h: Math.max(80, 20 + (comp.inputs.length + 1) * 18) }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'FSM': {
-      const stateText = (comp.states || []).slice(0, 4).join(' / ')
+      const stateText = (comp.states || []).slice(0, 3).join(' / ')
       const block = FunctionalBlock({
         title: 'FSM', subtitle: `states: ${stateText || 'n/a'}`,
-        inputs: comp.inputs, outputs: comp.outputs, color, w: 140, h: 90,
+        inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 140, h: 90 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'MEMORY': {
       const block = FunctionalBlock({
         title: comp.memKind || 'RAM',
         subtitle: `${comp.depth}×${comp.dataRange}`,
-        inputs: comp.inputs, outputs: comp.outputs, color, w: 120, h: 100, hatch: true,
+        inputs: comp.inputs, outputs: comp.outputs, color, hatch: true,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 120, h: 100 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'ADD':
@@ -1254,42 +1300,41 @@ function renderComponent(comp, opts = {}) {
     case 'MUL': {
       const glyphText = comp.kind === 'ADD' ? '+' : comp.kind === 'SUB' ? '−' : '×'
       const block = FunctionalBlock({
-        title: comp.kind, inputs: comp.inputs, outputs: comp.outputs, color, w: 90, h: 70,
-        extra: <text x="0" y="14" textAnchor="middle" fill={color}
-          fontSize="20" fontWeight="600" fontFamily="'JetBrains Mono',monospace">{glyphText}</text>,
+        title: comp.kind, ops: glyphText,
+        inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 90, h: 70 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'CMP': {
       // Single comparison (not a fused comparator block)
       const block = FunctionalBlock({
         title: 'CMP', subtitle: comp.opLabel || '==',
-        inputs: comp.inputs, outputs: comp.outputs, color, w: 90, h: 70,
+        inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 90, h: 70 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'PC': {
       const block = FunctionalBlock({
         title: 'PC', subtitle: `+${comp.delta || 4}`,
-        inputs: comp.inputs, outputs: comp.outputs, color, w: 90, h: 80,
+        inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 90, h: 80 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'SIGN_EXT': {
       const block = FunctionalBlock({
-        title: 'SIGN EXT', inputs: comp.inputs, outputs: comp.outputs, color, w: 100, h: 60,
+        title: 'SIGN EXT', inputs: comp.inputs, outputs: comp.outputs, color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 100, h: 60 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     default: {
       const block = FunctionalBlock({
-        title: comp.kind, inputs: comp.inputs || [], outputs: comp.outputs || [], color, w: 100, h: 80,
+        title: comp.kind, inputs: comp.inputs || [], outputs: comp.outputs || [], color,
       })
-      return { glyph: block.body, pinList: block.pinList, w: 100, h: 80 }
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
   }
 }
@@ -1404,18 +1449,19 @@ function IssueBanner({ logicIssues }) {
   )
 }
 
-/** Small ⚠ badge rendered on top of a component when issues are attached. */
+/** Small ⚠ badge rendered just OUTSIDE the top-right corner of the
+ *  component box so it never overlaps a port label or wire. */
 function ComponentIssueBadge({ issues, w, h }) {
   if (!issues || issues.length === 0) return null
   const color = severityColor(issues)
-  const x = (w / 2) - 8
-  const y = -(h / 2) + 2
+  const x = (w / 2) + 10
+  const y = -(h / 2) - 10
   return (
     <g>
       <title>{issues.map(it => `[${it.severity}] ${it.message}`).join('\n')}</title>
-      <circle cx={x} cy={y} r="7" fill={color} />
-      <text x={x} y={y + 3} textAnchor="middle"
-        fill="var(--bg-primary)" fontSize="9" fontWeight="700"
+      <circle cx={x} cy={y} r="8" fill={color} />
+      <text x={x} y={y + 4} textAnchor="middle"
+        fill="var(--bg-primary)" fontSize="11" fontWeight="700"
         fontFamily="'JetBrains Mono', monospace" pointerEvents="none">
         !
       </text>
@@ -1448,19 +1494,47 @@ function FlatView({
     () => attachIssuesToComponents(components, logicIssues),
     [components, logicIssues],
   )
-  const COL_INPUT_X = 80
-  const COL_COMP_X = 320
-  const COL_OUTPUT_X = 560
+
+  // Layout columns (per the spec):
+  //   - Input dots + labels at x=50 (labels right-aligned, ending at x=45)
+  //   - Component centres at x=350 (200-wide block → left edge x=250, right
+  //     edge x=450; gates centred at the same x sit comfortably inside)
+  //   - Output dots + labels at x=700 (labels left-aligned, starting at x=710)
+  //   - Total SVG width: 850 + 30 padding on each side = 910
+  const COL_INPUT_X = 50
+  const COL_INPUT_LABEL_X = 45
+  const COMP_CENTER_X = 350
+  const COL_OUTPUT_X = 700
+  const COL_OUTPUT_LABEL_X = 710
   const TOP_PAD = 50
 
-  const rendered = components.map((c, i) => ({ comp: c, index: i, render: renderComponent(c, { hasError: hasErrors }) }))
+  // Build a port-width lookup so external labels can show "a [3:0]" instead
+  // of just "a". Clocks and resets stay as bare names.
+  const portWidthByName = new Map()
+  for (const p of (mod.ports || [])) portWidthByName.set(p.name, p.width)
+
+  const formatSignal = (name, isClock) => {
+    if (isClock) return name
+    const w = portWidthByName.get(name)
+    if (w && w > 1) return `${name} [${w - 1}:0]`
+    return name
+  }
+
+  const rendered = components.map((c, i) => ({
+    comp: c,
+    index: i,
+    render: renderComponent(c, { hasError: hasErrors }),
+  }))
+
+  // Component vertical spacing — guarantee at least 30px clearance between
+  // adjacent components, and at least 50px for gates so 4+ gates don't crowd.
   const maxH = Math.max(60, ...rendered.map(r => r.render.h || 60))
-  const vSpacing = Math.max(maxH + 24, 90)
+  const vSpacing = Math.max(maxH + 30, 50)
 
   // Position each component vertically along the centre column
   const layout = rendered.map((r, i) => ({
     ...r,
-    cx: COL_COMP_X,
+    cx: COMP_CENTER_X,
     cy: TOP_PAD + maxH / 2 + i * vSpacing,
   }))
 
@@ -1478,107 +1552,150 @@ function FlatView({
       if (producedBy.has(n)) continue
       if (seenIn.has(n)) continue
       seenIn.add(n)
-      primaryInputs.push({ name: n, label: pin.port.label || n, isClock: pin.port.isClock })
+      primaryInputs.push({ name: n, isClock: pin.port.isClock })
     }
   })
-  // Also pull declared module inputs that weren't referenced (for clk/rst etc.)
+  // Pull declared module inputs that weren't referenced (clk/rst etc.)
   for (const p of mod.ports || []) {
     if (p.dir === 'input' && !seenIn.has(p.name) && !producedBy.has(p.name)) {
       seenIn.add(p.name)
-      primaryInputs.push({ name: p.name, label: p.name })
+      primaryInputs.push({ name: p.name })
     }
   }
 
   const primaryOutputs = []
   const seenOut = new Set()
-  // Any output from a component that is also a module output, or an
-  // unconsumed output, shows on the right column.
   const moduleOutNames = new Set((mod.ports || []).filter(p => p.dir === 'output').map(p => p.name))
   layout.forEach((r) => {
     for (const o of r.comp.outputs || []) {
       if (!seenOut.has(o.name) && (moduleOutNames.has(o.name) || moduleOutNames.size === 0)) {
         seenOut.add(o.name)
-        primaryOutputs.push({ name: o.name, label: o.label || o.name, gateIndex: r.index })
+        primaryOutputs.push({ name: o.name, gateIndex: r.index })
       }
     }
   })
 
-  // Compute SVG size
-  const svgWidth = COL_OUTPUT_X + 80
-  const svgHeight = Math.max(280, TOP_PAD + layout.length * vSpacing + 50, TOP_PAD + primaryInputs.length * 30 + 50)
+  // Vertical spacing for primary inputs — 40px default, 30px when crowded
+  // (more than 6 inputs), but never less.
+  const inSpacing = primaryInputs.length > 6 ? 30 : 40
+  const inputColumnHeight = Math.max(0, (primaryInputs.length - 1) * inSpacing)
 
-  // Primary input vertical spacing
-  const inYSpacing = primaryInputs.length > 1
-    ? Math.min(34, (svgHeight - TOP_PAD * 2) / (primaryInputs.length))
-    : 0
+  // Compute SVG size before placing inputs so we can centre them vertically.
+  const componentColumnHeight = layout.length * vSpacing
+  const innerHeight = Math.max(componentColumnHeight, inputColumnHeight + 80)
+  const svgHeight = TOP_PAD + innerHeight + TOP_PAD
+  const svgWidth = 850
+
+  const inputColumnTop = TOP_PAD + (innerHeight - inputColumnHeight) / 2
   const inputPositions = primaryInputs.map((sig, i) => ({
     ...sig,
     x: COL_INPUT_X,
-    y: TOP_PAD + 10 + i * inYSpacing,
+    y: inputColumnTop + i * inSpacing,
   }))
   const inputByName = new Map(inputPositions.map(p => [p.name, p]))
 
-  // Wire routing
+  // Wire routing — Manhattan style. For inputs that fan out to multiple
+  // pins, draw ONE horizontal stub from the input dot, drop a vertical
+  // trunk, then horizontal branches to each pin.
   const wires = []
   const junctions = []
-  const branchCount = new Map()
-  primaryInputs.forEach(p => branchCount.set(p.name, 0))
 
+  // Group all consuming pins per primary input so we can route them together
+  const consumersByInput = new Map()  // signal → [{absX, absY, side}]
   layout.forEach((r) => {
     const pins = r.render.pinList?.in || []
     for (const pin of pins) {
       const sig = pin.port?.name
       if (!sig) continue
-      const pinAbsX = r.cx + pin.x
-      const pinAbsY = r.cy + pin.y
-
-      if (inputByName.has(sig)) {
-        const src = inputByName.get(sig)
-        const bi = branchCount.get(sig) || 0
-        branchCount.set(sig, bi + 1)
-        const busX = COL_INPUT_X + 40 + bi * 8
-        let points
-        if (pin.side === 'bottom') {
-          points = [
-            [src.x + 6, src.y],
-            [busX, src.y],
-            [busX, pinAbsY + 15],
-            [pinAbsX, pinAbsY + 15],
-            [pinAbsX, pinAbsY],
-          ]
-        } else {
-          points = [
-            [src.x + 6, src.y],
-            [busX, src.y],
-            [busX, pinAbsY],
-            [pinAbsX, pinAbsY],
-          ]
-        }
-        wires.push({ points, signal: sig, sourceKind: 'primary' })
-        if (bi >= 1) junctions.push({ x: src.x + 6, y: src.y })
-      } else {
-        const srcIdx = producedBy.get(sig)
-        if (srcIdx == null) continue
-        const srcRender = layout[srcIdx]
-        const outPin = srcRender.render.pinList?.out?.[0]
-        if (!outPin) continue
-        const srcX = srcRender.cx + outPin.x
-        const srcY = srcRender.cy + outPin.y
-        const midX = Math.max(srcX + 20, pinAbsX - 30)
-        wires.push({
-          points: [
-            [srcX, srcY],
-            [midX, srcY],
-            [midX, pinAbsY],
-            [pinAbsX, pinAbsY],
-          ],
-          signal: sig, sourceKind: 'intermediate',
-        })
-      }
+      if (!inputByName.has(sig)) continue
+      const entry = consumersByInput.get(sig) || []
+      entry.push({
+        absX: r.cx + pin.x,
+        absY: r.cy + pin.y,
+        side: pin.side,
+      })
+      consumersByInput.set(sig, entry)
     }
   })
 
-  // Output wires to right column
+  // Trunk x positions are staggered so multiple inputs don't share a column.
+  let trunkOffset = 0
+  for (const [sig, consumers] of consumersByInput) {
+    const src = inputByName.get(sig)
+    const trunkX = COL_INPUT_X + 40 + (trunkOffset % 8) * 8
+    trunkOffset++
+
+    // Sort consumers top-to-bottom so the trunk doesn't double back
+    consumers.sort((a, b) => a.absY - b.absY)
+
+    // 1. Stub from the input dot rightward to the trunk
+    wires.push({
+      points: [[src.x + 4, src.y], [trunkX, src.y]],
+      signal: sig, sourceKind: 'primary-stub',
+    })
+
+    // 2. Trunk vertical from the source Y to span all consumer Ys
+    const minY = Math.min(src.y, ...consumers.map(c => c.absY))
+    const maxY = Math.max(src.y, ...consumers.map(c => c.absY))
+    if (minY !== maxY) {
+      wires.push({
+        points: [[trunkX, minY], [trunkX, maxY]],
+        signal: sig, sourceKind: 'primary-trunk',
+      })
+    }
+
+    // 3. Horizontal branch from trunk to each consumer pin
+    for (const c of consumers) {
+      if (c.side === 'bottom') {
+        // Pin enters from the bottom — drop down to one level below the pin,
+        // then horizontal to the pin's X, then up to the pin.
+        const dropY = c.absY + 20
+        wires.push({
+          points: [[trunkX, c.absY], [c.absX, c.absY]],
+          signal: sig, sourceKind: 'primary-branch',
+        })
+        // Note: for bottom pins, c.absY is the pin's bottom point; we still
+        // route horizontally to its column then drop; the calling glyph
+        // already draws the stub up to the box from there.
+        // Add a junction dot at the trunk-branch intersection.
+        junctions.push({ x: trunkX, y: c.absY })
+      } else {
+        wires.push({
+          points: [[trunkX, c.absY], [c.absX, c.absY]],
+          signal: sig, sourceKind: 'primary-branch',
+        })
+        // Junction at the trunk if there are multiple consumers
+        if (consumers.length >= 2) {
+          junctions.push({ x: trunkX, y: c.absY })
+        }
+      }
+    }
+  }
+
+  // Wires from intermediate signals (one component's output → another's input)
+  layout.forEach((r) => {
+    const pins = r.render.pinList?.in || []
+    for (const pin of pins) {
+      const sig = pin.port?.name
+      if (!sig || inputByName.has(sig)) continue
+      const srcIdx = producedBy.get(sig)
+      if (srcIdx == null) continue
+      const srcRender = layout[srcIdx]
+      const outPin = srcRender.render.pinList?.out?.[0]
+      if (!outPin) continue
+      const srcX = srcRender.cx + outPin.x
+      const srcY = srcRender.cy + outPin.y
+      const dstX = r.cx + pin.x
+      const dstY = r.cy + pin.y
+      const midX = Math.max(srcX + 20, dstX - 30)
+      wires.push({
+        points: [[srcX, srcY], [midX, srcY], [midX, dstY], [dstX, dstY]],
+        signal: sig, sourceKind: 'intermediate',
+      })
+    }
+  })
+
+  // Output wires to the right column
   for (const out of primaryOutputs) {
     const r = layout[out.gateIndex]
     if (!r) continue
@@ -1587,7 +1704,7 @@ function FlatView({
     const srcX = r.cx + outPin.x
     const srcY = r.cy + outPin.y
     wires.push({
-      points: [[srcX, srcY], [COL_OUTPUT_X - 6, srcY], [COL_OUTPUT_X - 6, srcY]],
+      points: [[srcX, srcY], [COL_OUTPUT_X - 4, srcY]],
       signal: out.name, sourceKind: 'output', finalY: srcY,
     })
   }
@@ -1603,9 +1720,10 @@ function FlatView({
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '10px' }}>
         <svg
           viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+          preserveAspectRatio="xMidYMid meet"
           style={{ width: '100%', maxWidth: `${svgWidth + 40}px`, height: 'auto', display: 'block', margin: '0 auto' }}
         >
-          {/* Primary inputs */}
+          {/* Primary input dots + bit-width labels (right-aligned at COL_INPUT_LABEL_X) */}
           {inputPositions.map((p) => {
             const isHot = hoveredSignal === p.name
             const color = isHot ? HILITE : ACCENT
@@ -1615,9 +1733,9 @@ function FlatView({
                  onMouseLeave={() => setHoveredSignal(null)}
               >
                 <circle cx={p.x} cy={p.y} r="3" fill={color} />
-                <text x={p.x - 8} y={p.y + 4} textAnchor="end" fill={color}
-                  fontFamily="'JetBrains Mono', monospace" fontSize="10">
-                  {p.label}
+                <text x={COL_INPUT_LABEL_X} y={p.y + 4} textAnchor="end" fill={color}
+                  fontFamily="'JetBrains Mono', monospace" fontSize="11">
+                  {formatSignal(p.name, p.isClock)}
                 </text>
               </g>
             )
@@ -1639,9 +1757,9 @@ function FlatView({
             )
           })}
 
-          {/* Junction dots */}
+          {/* Junction dots — 4px filled circles where wires branch */}
           {junctions.map((j, i) => (
-            <circle key={`j-${i}`} cx={j.x} cy={j.y} r="2.2" fill={WIRE} />
+            <circle key={`j-${i}`} cx={j.x} cy={j.y} r="3" fill={WIRE} />
           ))}
 
           {/* Components */}
@@ -1680,7 +1798,7 @@ function FlatView({
             )
           })}
 
-          {/* Primary outputs */}
+          {/* Primary output dots + bit-width labels (left-aligned at COL_OUTPUT_LABEL_X) */}
           {primaryOutputs.map((o) => {
             const r = layout[o.gateIndex]
             if (!r) return null
@@ -1695,13 +1813,25 @@ function FlatView({
                  onMouseLeave={() => setHoveredSignal(null)}
               >
                 <circle cx={COL_OUTPUT_X} cy={y} r="3" fill={color} />
-                <text x={COL_OUTPUT_X + 8} y={y + 4} textAnchor="start" fill={color}
-                  fontFamily="'JetBrains Mono', monospace" fontSize="10">
-                  {o.label}
+                <text x={COL_OUTPUT_LABEL_X} y={y + 4} textAnchor="start" fill={color}
+                  fontFamily="'JetBrains Mono', monospace" fontSize="11">
+                  {formatSignal(o.name, false)}
                 </text>
               </g>
             )
           })}
+
+          {/* Gate-style components get a small name label below the symbol so
+              users can tell AND vs OR at a glance, per the spec. */}
+          {layout.filter(r => r.render.gateType).map((r) => (
+            <text key={`gname-${r.index}`}
+              x={r.cx} y={r.cy + GATE_H / 2 + 22}
+              textAnchor="middle" fill="var(--accent-secondary)"
+              fontSize="9" opacity="0.85"
+              fontFamily="'JetBrains Mono', monospace">
+              {r.render.gateType}
+            </text>
+          ))}
         </svg>
       </div>
 
