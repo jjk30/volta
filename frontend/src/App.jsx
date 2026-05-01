@@ -149,6 +149,7 @@ function App() {
   const [savedDesign, setSavedDesign] = useState(DEFAULT_DESIGN)
   const [projectSearch, setProjectSearch] = useState('')
   const [symbolsCollapsed, setSymbolsCollapsed] = useState(false)
+  const [logicIssues, setLogicIssues] = useState([])  // [{line, severity, code, message, snippet}]
 
   // Target (Icarus | iCE40 FPGA | ECP5 FPGA) drives whether SIM runs a
   // simulation or kicks off Yosys FPGA synthesis.
@@ -248,6 +249,7 @@ function App() {
       setDesign(data.design)
       setTestbench(data.testbench)
       setSavedDesign(data.design)        // mark as just-saved
+      setLogicIssues(data.logic_issues || [])
       setGenerateDone(true)
       setTimeout(() => setGenerateDone(false), 3000)
       setChatAutoMessage(`explain-${Date.now()}`)
@@ -635,6 +637,7 @@ function App() {
                   design={design}
                   hasErrors={!!simResult?.stderr}
                   onGateClick={handleGateClick}
+                  logicIssues={logicIssues}
                 />
               )}
               {editorTab === 'DIAGRAM' && (
@@ -782,6 +785,7 @@ function App() {
               autoMessage={chatAutoMessage}
               simResult={simResult}
               selectedSymbols={selectedSymbols}
+              logicIssues={logicIssues}
             />
           </div>
           <div

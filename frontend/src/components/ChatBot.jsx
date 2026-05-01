@@ -81,7 +81,7 @@ function ThinkingDots() {
   )
 }
 
-export default function ChatBot({ design, testbench, autoMessage, simResult, selectedSymbols = [] }) {
+export default function ChatBot({ design, testbench, autoMessage, simResult, selectedSymbols = [], logicIssues = [] }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -143,6 +143,13 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
             name: s.name,
             promptText: s.promptText || '',
             truthTable: s.truthTable || null,
+          })),
+          logicIssues: (logicIssues || []).map((it) => ({
+            line: it.line,
+            severity: it.severity,
+            code: it.code,
+            message: it.message,
+            snippet: it.snippet || '',
           })),
         }),
       })
