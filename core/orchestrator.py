@@ -138,8 +138,52 @@ def _fix_verilog(verilog: str) -> str:
     code = _fix_undeclared_inputs(code)
     code = _fix_input_assignments(code)
     code = _fix_carry_logic(code)
+    code = _fix_number_literals(code)
     code = _strip_systemverilog(code)
     return code
+
+
+def _fix_number_literals(verilog: str) -> str:
+    """Auto-correct ``N'd<digits>`` literals where the digits are obviously
+    binary (only 0s and 1s) AND the digit count equals the bit width.
+
+    The LLM occasionally writes testbench inputs like ``a = 4'd1100;`` when
+    it means ``4'b1100`` (decimal 12). The base ``'d`` makes Verilog parse
+    that as decimal 1100, which doesn't fit in 4 bits and gets silently
+    truncated to ``4'd12`` (or rejected).
+
+    Heuristic — only rewrite when ALL of these hold:
+        * Base is ``d`` / ``D`` (decimal)
+        * Digits are all 0 or 1
+        * Digit count == declared width
+        * Width >= 2 (so we don't change ``1'd0`` / ``1'd1`` which are
+          unambiguous decimal-or-binary)
+
+    Examples:
+        4'd1100   → 4'b1100   (binary 1100 == decimal 12)
+        8'd10110011 → 8'b10110011
+        4'd5      → unchanged (has a non-binary digit)
+        4'd15     → unchanged (digit count 2 != width 4)
+        8'd255    → unchanged (digit count 3 != width 8)
+        1'd0      → unchanged (width 1 — ambiguous, leave alone)
+    """
+
+    pattern = re.compile(r"(\d+)'([dD])([0-9_]+)")
+
+    def repl(m):
+        width_s, base, digits = m.group(1), m.group(2), m.group(3)
+        try:
+            width = int(width_s)
+        except ValueError:
+            return m.group(0)
+        clean = digits.replace("_", "")
+        if width < 2 or len(clean) != width:
+            return m.group(0)
+        if any(ch not in "01" for ch in clean):
+            return m.group(0)
+        return f"{width_s}'b{digits}"
+
+    return pattern.sub(repl, verilog)
 
 
 def _fix_carry_logic(verilog: str) -> str:
@@ -739,6 +783,209 @@ def _strip_systemverilog(verilog: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Logic validation — flag mathematically/logically suspicious patterns
+# ---------------------------------------------------------------------------
+
+def _validate_logic(verilog: str) -> list[dict]:
+    """Scan Verilog for common logic / arithmetic mistakes and return a list of
+    structured issues.
+
+    Each issue is a dict::
+
+        { "line": int (1-based), "severity": "ERROR" | "WARNING",
+          "message": str, "code": str (short tag), "snippet": str }
+
+    The checks are deliberately conservative — we only flag patterns we are
+    very confident about. False positives are worse than false negatives here
+    because every flagged issue is shown in the schematic and chat.
+    """
+
+    issues: list[dict] = []
+    lines = verilog.split('\n')
+    if not lines:
+        return issues
+
+    # --- Build a quick lookup of declared signal widths ---------------------
+    # Includes both port-list declarations and body wire/reg declarations.
+    declared_widths: dict[str, int] = {}
+
+    port_match = re.search(r'module\s+\w+\s*\((.*?)\)\s*;', verilog, re.DOTALL)
+    if port_match:
+        for raw in port_match.group(1).split(','):
+            decl = raw.strip()
+            wm = re.match(
+                r'(?:input|output|inout)\s+(?:reg\s+|wire\s+|logic\s+)?'
+                r'(?:signed\s+)?(?:\[(\d+):(\d+)\])?\s*(\w+)',
+                decl,
+            )
+            if wm:
+                if wm.group(1):
+                    width = abs(int(wm.group(1)) - int(wm.group(2))) + 1
+                else:
+                    width = 1
+                declared_widths[wm.group(3)] = width
+
+    body_offset = port_match.end() if port_match else 0
+    body = verilog[body_offset:]
+    for wm in re.finditer(
+        r'\b(?:wire|reg|logic)\s+(?:signed\s+)?(?:\[(\d+):(\d+)\])?\s*(\w+)\s*[;,]',
+        body,
+    ):
+        if wm.group(1):
+            width = abs(int(wm.group(1)) - int(wm.group(2))) + 1
+        else:
+            width = 1
+        # Don't overwrite a port declaration if both exist
+        declared_widths.setdefault(wm.group(3), width)
+
+    def add(idx: int, severity: str, code: str, message: str, snippet: str = ''):
+        issues.append({
+            'line': idx + 1,
+            'severity': severity,
+            'code': code,
+            'message': message,
+            'snippet': snippet.strip(),
+        })
+
+    # --- Per-line scans ----------------------------------------------------
+    for i, raw_line in enumerate(lines):
+        # Strip line-comments before pattern matching
+        line = re.sub(r'//.*$', '', raw_line)
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        # 1. <signal> <op> (a - b) < 0          (always 0 for unsigned)
+        # 1.b <signal> <op> (a - b) < N'd0
+        m = re.search(
+            r"\b(\w+)\s*(?:<=|=)\s*\(\s*\w+\s*-\s*\w+\s*\)\s*<\s*(?:\d+'[dD])?0\s*;",
+            stripped,
+        )
+        if m:
+            add(i, 'ERROR', 'unsigned_lt_zero',
+                f"Unsigned value can never be less than 0 — '{m.group(1)}' borrow predicate is dead. "
+                f"Use ({m.group(1)} = a < b) instead.",
+                stripped)
+
+        # 2. N-bit value > (2^N - 1)            (always false)
+        for cm in re.finditer(
+            r"\b(\w+)\s*(?:<=|=)\s*\(\s*[^()]+?\)\s*>\s*(\d+)'[dD](\d+)\s*;",
+            stripped,
+        ):
+            try:
+                w = int(cm.group(2))
+                v = int(cm.group(3))
+            except ValueError:
+                continue
+            if w > 0 and v == (1 << w) - 1:
+                add(i, 'WARNING', 'overflow_check_dead',
+                    f"{w}-bit value can never exceed {v} — comparison stuck at 0. "
+                    f"Use a wider expression like {{c, sum}} = a + b for true carry detection.",
+                    stripped)
+
+        # 3. N-bit addition into N-bit register WITHOUT a carry capture
+        m = re.match(
+            r"^\s*(\w+)\s*(?:<=|=)\s*(\w+)\s*\+\s*(\w+)\s*;\s*$",
+            stripped,
+        )
+        if m:
+            dst, a, b = m.group(1), m.group(2), m.group(3)
+            wd = declared_widths.get(dst)
+            wa = declared_widths.get(a)
+            wb = declared_widths.get(b)
+            if wd and wa and wb and wd == wa == wb and wd >= 2:
+                add(i, 'WARNING', 'add_truncates_carry',
+                    f"{wd}-bit + {wd}-bit stored in a {wd}-bit register — high carry bit is "
+                    f"truncated. Capture it with {{c, {dst}}} = {a} + {b};",
+                    stripped)
+
+        # 4. N-bit multiplication into N-bit register
+        m = re.match(
+            r"^\s*(\w+)\s*(?:<=|=)\s*(\w+)\s*\*\s*(\w+)\s*;\s*$",
+            stripped,
+        )
+        if m:
+            dst, a, b = m.group(1), m.group(2), m.group(3)
+            wd = declared_widths.get(dst)
+            wa = declared_widths.get(a)
+            wb = declared_widths.get(b)
+            if wd and wa and wb and wd < wa + wb:
+                add(i, 'WARNING', 'mul_overflow',
+                    f"{wa}-bit × {wb}-bit product needs {wa + wb} bits — '{dst}' "
+                    f"is only {wd} bits wide.",
+                    stripped)
+
+        # 5. Cross-width comparison without explicit extension
+        m = re.search(
+            r"\b(\w+)\s*(==|!=|<|>|<=|>=)\s*(\w+)\b",
+            stripped,
+        )
+        if m and m.group(2) not in ('=',):
+            a, op, b = m.group(1), m.group(2), m.group(3)
+            wa = declared_widths.get(a)
+            wb = declared_widths.get(b)
+            if wa and wb and wa != wb and max(wa, wb) >= 2:
+                add(i, 'WARNING', 'width_mismatch_compare',
+                    f"Comparing {wa}-bit '{a}' with {wb}-bit '{b}' — mismatched widths. "
+                    f"Zero-extend the narrower operand explicitly.",
+                    stripped)
+
+    # --- Block-level scans -------------------------------------------------
+    # 6. case statement that covers every value of an N-bit selector but
+    #    still has a `default:` branch → unreachable default.
+    for cm in re.finditer(
+        r"case\s*\(\s*(\w+)\s*\)([\s\S]*?)endcase",
+        verilog,
+    ):
+        sel = cm.group(1)
+        body_text = cm.group(2)
+        sel_w = declared_widths.get(sel)
+        if not sel_w:
+            continue
+        # Count distinct case values (ignoring `default`).
+        vals = set()
+        for vm in re.finditer(
+            r"(?:^|;|\s|begin)((?:\d+'[bdhBDH][0-9a-fA-FxXzZ_]+))\s*:",
+            body_text,
+        ):
+            vals.add(vm.group(1))
+        has_default = bool(re.search(r"\bdefault\s*:", body_text))
+        if sel_w <= 6 and has_default and len(vals) >= (1 << sel_w):
+            line_idx = verilog[:cm.start()].count('\n')
+            add(line_idx, 'WARNING', 'unreachable_default',
+                f"Default case is unreachable — all {1 << sel_w} values of {sel}[{sel_w-1}:0] "
+                f"are already covered.",
+                f"case ({sel}) ... default: ... endcase")
+
+    # 7. always @(*) with `if` but no `else` and assignment to a single
+    #    signal that's only assigned in some branches → potential latch.
+    for am in re.finditer(
+        r"always\s*@\s*\(\s*\*\s*\)\s*(?:begin\b)?([\s\S]*?)(?=\balways\b|\bendmodule\b|$)",
+        verilog,
+    ):
+        block = am.group(1)
+        if 'if' in block and 'else' not in block:
+            # Collect signals assigned in the block
+            assigned = set()
+            for nm in re.finditer(r"\b(\w+)\s*(?:<=|=)\s*[^;=]", block):
+                w = nm.group(1)
+                if w not in (
+                    'if', 'else', 'case', 'casex', 'casez', 'begin', 'end',
+                    'default', 'endcase', 'posedge', 'negedge',
+                ):
+                    assigned.add(w)
+            if assigned:
+                line_idx = verilog[:am.start()].count('\n')
+                names = ', '.join(sorted(assigned))
+                add(line_idx, 'WARNING', 'incomplete_if_latch',
+                    f"Combinational always block has if without else — '{names}' "
+                    f"may infer a latch. Provide an else branch or default assignment.",
+                    'always @(*) if (...) ...')
+
+    return issues
+
+
+# ---------------------------------------------------------------------------
 # Parse module info from Verilog source
 # ---------------------------------------------------------------------------
 
@@ -1198,6 +1445,7 @@ def generate(prompt: str, model: str = "qwen2.5-coder:7b") -> dict:
     if spec and spec.modules[0].test_vectors:
         try:
             testbench = generate_verilog_testbench(spec, design)
+            testbench = _fix_number_literals(testbench)
             ok, stderr = verify_compile(design, testbench)
             if ok:
                 print(f"  ✓ Spec-based testbench ({len(testbench)} chars)")
@@ -1214,6 +1462,7 @@ def generate(prompt: str, model: str = "qwen2.5-coder:7b") -> dict:
         fallback_used = fallback_used or "smoke_testbench"
         try:
             testbench = generate_smoke_testbench(design)
+            testbench = _fix_number_literals(testbench)
             print(f"  ✓ Smoke-test testbench ({len(testbench)} chars)")
         except Exception as e:
             print(f"  ⚠ Smoke-test generation failed: {e}")
@@ -1242,12 +1491,31 @@ endmodule"""
         if "smoke" not in (fallback_used or ""):
             print(f"  Trying smoke-test testbench...")
             testbench = generate_smoke_testbench(design)
+            testbench = _fix_number_literals(testbench)
             compile_ok, stderr = verify_compile(design, testbench)
             if compile_ok:
                 print(f"  ✓ Smoke-test compile passed")
                 fallback_used = fallback_used or "smoke_testbench"
             else:
                 print(f"  ⚠ Still failing — returning best effort")
+
+    # ------------------------------------------------------------------
+    # Step 6: Logic validation — surface impossible / dead / latching code
+    # ------------------------------------------------------------------
+    print(f"\n  Step 6: Validating logic...")
+    try:
+        logic_issues = _validate_logic(design)
+        if logic_issues:
+            err_n = sum(1 for it in logic_issues if it['severity'] == 'ERROR')
+            warn_n = sum(1 for it in logic_issues if it['severity'] == 'WARNING')
+            print(f"  ⚠ Found {err_n} error(s), {warn_n} warning(s):")
+            for it in logic_issues:
+                print(f"    [{it['severity']}] line {it['line']}: {it['message']}")
+        else:
+            print(f"  ✓ No logic issues detected")
+    except Exception as e:
+        print(f"  ⚠ Logic validation failed (non-fatal): {e}")
+        logic_issues = []
 
     # ------------------------------------------------------------------
     # Done
@@ -1270,6 +1538,7 @@ endmodule"""
         "correction": correction,
         "compile_ok": compile_ok,
         "fallback_used": fallback_used,
+        "logic_issues": logic_issues,
     }
 
 

@@ -269,10 +269,19 @@ class CorrectionInfo(BaseModel):
     errors_fixed: list[str] = []
 
 
+class LogicIssue(BaseModel):
+    line: int
+    severity: str        # "ERROR" | "WARNING"
+    code: str            # short tag, e.g. "overflow_check_dead"
+    message: str
+    snippet: str = ""
+
+
 class GenerateResponse(BaseModel):
     design: str
     testbench: str
     correction: Optional[CorrectionInfo] = None
+    logic_issues: list[LogicIssue] = []
 
 
 @app.post("/generate", response_model=GenerateResponse)
@@ -312,10 +321,15 @@ async def generate(req: GenerateRequest):
         errors_fixed=correction_data.get("errors_fixed", []),
     )
 
+    issues = [
+        LogicIssue(**it) for it in (result.get("logic_issues") or [])
+    ]
+
     return GenerateResponse(
         design=result["design"],
         testbench=result["testbench"],
         correction=correction,
+        logic_issues=issues,
     )
 
 
@@ -719,6 +733,14 @@ class SelectedSymbolData(BaseModel):
     truthTable: Optional[TruthTableData] = None
 
 
+class LogicIssueData(BaseModel):
+    line: int = 0
+    severity: str = "WARNING"
+    code: str = ""
+    message: str = ""
+    snippet: str = ""
+
+
 class ChatRequest(BaseModel):
     message: str
     design: str = ""
@@ -726,6 +748,7 @@ class ChatRequest(BaseModel):
     history: list[ChatMessage] = []
     simulation: Optional[SimulationData] = None
     selectedSymbols: list[SelectedSymbolData] = []
+    logicIssues: list[LogicIssueData] = []
 
 
 class ChatResponse(BaseModel):
@@ -932,6 +955,21 @@ async def chat(req: ChatRequest):
     if req.simulation and req.simulation.signals:
         sim_summary = _build_simulation_summary(req.simulation)
         context_parts.append(f"\n{sim_summary}")
+
+    # Logic issues from /generate post-validation. Make them prominent so the
+    # auto-explain assistant surfaces them up-front.
+    if req.logicIssues:
+        issue_lines = []
+        for it in req.logicIssues:
+            issue_lines.append(
+                f"- Line {it.line} [{it.severity}] {it.message}"
+            )
+        context_parts.append(
+            "\nLogic issues detected in the generated design "
+            "(found by static analysis — please mention them to the user "
+            "with a clear WARNING/ERROR label and the line number):\n"
+            + "\n".join(issue_lines)
+        )
 
     # Inject context for ALL selected symbols (or infer from text)
     selected = req.selectedSymbols or []

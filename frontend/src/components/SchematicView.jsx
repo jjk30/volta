@@ -765,20 +765,55 @@ function classifyCase(selVar, items) {
 function parseSequentialBlock(body, clk, components, signalOwners) {
   const ctx = extractTopLevelCondSignals(body)
 
-  // FSM detection via case on a state signal
-  const caseMatch = body.match(/case\s*\(\s*([\w]+)\s*\)([\s\S]*?)endcase/)
-  if (caseMatch && /^(state|cs|curr_state|ns|ps|cstate|nstate)$/i.test(caseMatch[1])) {
+  // ---- Inspect the block contents BEFORE classifying ----
+  // Priority order:
+  //   1. case + arithmetic/logic ops on a non-state selector → ALU
+  //   2. case on a state-named selector → FSM
+  //   3. shift-register concatenation → SHIFT_REG
+  //   4. counter increment (q <= q + k) → COUNTER
+  //   5. simple q <= d → DFF
+  // (Per-assignment fallthrough handles 3–5.)
+
+  const caseMatch = body.match(/case\s*\(\s*([\w\[\]:]+)\s*\)([\s\S]*?)endcase/)
+  if (caseMatch) {
+    const selVar = caseMatch[1].replace(/\[.*\]/, '').trim()
     const items = parseCaseItems(caseMatch[2])
-    components.push({
-      kind: 'FSM',
-      stateVar: caseMatch[1],
-      states: items.map(i => i.value).filter(v => v.toLowerCase() !== 'default'),
-      inputs: [{ name: clk, label: 'CLK', isClock: true }, ...(ctx.hasReset ? [{ name: 'rst', label: 'RST' }] : [])],
-      outputs: [{ name: caseMatch[1], label: caseMatch[1].toUpperCase() }],
-      source: `always @(posedge ${clk}) case(${caseMatch[1]})`,
-    })
-    signalOwners.set(caseMatch[1], components.length - 1)
-    return
+    const isStateSelector = /^(state|cs|curr_state|next_state|nstate|pstate|ns|ps|cstate)$/i.test(selVar)
+
+    if (isStateSelector) {
+      // FSM: case on state register
+      components.push({
+        kind: 'FSM',
+        stateVar: selVar,
+        states: items.map(i => i.value).filter(v => v.toLowerCase() !== 'default'),
+        inputs: [{ name: clk, label: 'CLK', isClock: true }, ...(ctx.hasReset ? [{ name: 'rst', label: 'RST' }] : [])],
+        outputs: [{ name: selVar, label: selVar.toUpperCase() }],
+        source: `always @(posedge ${clk}) case(${selVar})`,
+      })
+      signalOwners.set(selVar, components.length - 1)
+      return
+    }
+
+    // Otherwise let the existing case classifier (ALU / DECODER / MUX_BLOCK)
+    // take over — it inspects each branch's RHS for arithmetic/logic ops.
+    if (items.length > 0) {
+      const classification = classifyCase(selVar, items)
+
+      // Inject CLK + RST inputs since this is in a posedge block — they are
+      // not visible from the case-body alone.
+      const seqInputs = [
+        { name: clk, label: 'CLK', isClock: true },
+        ...(ctx.hasReset ? [{ name: 'rst', label: 'RST' }] : []),
+      ]
+      classification.inputs = [...(classification.inputs || []), ...seqInputs]
+      classification.source = `always @(posedge ${clk}) ${classification.source || `case(${selVar})`}`
+
+      components.push(classification)
+      for (const o of classification.outputs || []) {
+        signalOwners.set(o.name, components.length - 1)
+      }
+      return
+    }
   }
 
   const nbas = collectNBAs(body)
@@ -1263,7 +1298,7 @@ function renderComponent(comp, opts = {}) {
 // PART 8 — Main view
 // ============================================================================
 
-export default function SchematicView({ design, hasErrors = false, onGateClick }) {
+export default function SchematicView({ design, hasErrors = false, onGateClick, logicIssues = [] }) {
   const parsed = useMemo(() => parseDesign(design || ''), [design])
   const [hovered, setHovered] = useState(null)
   const [hoveredSignal, setHoveredSignal] = useState(null)
@@ -1281,12 +1316,13 @@ export default function SchematicView({ design, hasErrors = false, onGateClick }
         template={parsed.template}
         interfaceType={parsed.interfaceType}
         hasErrors={hasErrors}
+        logicIssues={logicIssues}
       />
     )
   }
 
   if (parsed.kind === 'module-fallback') {
-    return <ModuleFallbackView module={parsed.module} hasErrors={hasErrors} />
+    return <ModuleFallbackView module={parsed.module} hasErrors={hasErrors} logicIssues={logicIssues} />
   }
 
   return (
@@ -1301,7 +1337,89 @@ export default function SchematicView({ design, hasErrors = false, onGateClick }
       setHovered={setHovered}
       hoveredSignal={hoveredSignal}
       setHoveredSignal={setHoveredSignal}
+      logicIssues={logicIssues}
     />
+  )
+}
+
+// Map a logic issue to the component most likely responsible. Heuristic:
+// pick the component whose source string contains an identifier from the
+// issue's snippet. If no match, leave it as a "global" issue shown in the
+// banner only.
+function attachIssuesToComponents(components, logicIssues) {
+  const perCompIssues = new Map() // component index → [issue]
+  for (const issue of (logicIssues || [])) {
+    const snippet = issue.snippet || ''
+    let bestIdx = -1
+    let bestHit = 0
+    components.forEach((comp, idx) => {
+      const src = (comp.source || '').toLowerCase()
+      if (!src) return
+      let hits = 0
+      for (const tok of snippet.toLowerCase().match(/\b\w+\b/g) || []) {
+        if (tok.length < 2) continue
+        if (src.includes(tok)) hits++
+      }
+      // Also check the output names — they're often the giveaway
+      for (const o of comp.outputs || []) {
+        if (snippet.includes(o.name)) hits += 2
+      }
+      if (hits > bestHit) { bestHit = hits; bestIdx = idx }
+    })
+    if (bestIdx >= 0 && bestHit >= 1) {
+      if (!perCompIssues.has(bestIdx)) perCompIssues.set(bestIdx, [])
+      perCompIssues.get(bestIdx).push(issue)
+    }
+  }
+  return perCompIssues
+}
+
+function severityColor(issues) {
+  if (!issues || issues.length === 0) return null
+  if (issues.some(it => it.severity === 'ERROR')) return 'var(--error)'
+  return 'var(--warning)'
+}
+
+function IssueBanner({ logicIssues }) {
+  if (!logicIssues || logicIssues.length === 0) return null
+  const errors = logicIssues.filter(it => it.severity === 'ERROR')
+  const warnings = logicIssues.filter(it => it.severity === 'WARNING')
+  const sev = errors.length > 0 ? 'ERROR' : 'WARNING'
+  const color = sev === 'ERROR' ? 'var(--error)' : 'var(--warning)'
+  return (
+    <div style={{
+      padding: '6px 12px',
+      background: sev === 'ERROR' ? 'var(--error-bg)' : 'var(--warning-bg)',
+      borderBottom: `1px solid ${color}`,
+      color,
+      fontSize: '10px',
+      fontFamily: "'JetBrains Mono', monospace",
+      letterSpacing: '0.5px',
+      flexShrink: 0,
+    }}>
+      <span style={{ fontWeight: 700, marginRight: '8px' }}>⚠</span>
+      {errors.length} error{errors.length === 1 ? '' : 's'},
+      {' '}{warnings.length} warning{warnings.length === 1 ? '' : 's'} in generated logic — see Volta Assistant for details.
+    </div>
+  )
+}
+
+/** Small ⚠ badge rendered on top of a component when issues are attached. */
+function ComponentIssueBadge({ issues, w, h }) {
+  if (!issues || issues.length === 0) return null
+  const color = severityColor(issues)
+  const x = (w / 2) - 8
+  const y = -(h / 2) + 2
+  return (
+    <g>
+      <title>{issues.map(it => `[${it.severity}] ${it.message}`).join('\n')}</title>
+      <circle cx={x} cy={y} r="7" fill={color} />
+      <text x={x} y={y + 3} textAnchor="middle"
+        fill="var(--bg-primary)" fontSize="9" fontWeight="700"
+        fontFamily="'JetBrains Mono', monospace" pointerEvents="none">
+        !
+      </text>
+    </g>
   )
 }
 
@@ -1324,7 +1442,12 @@ function PlaceholderSchematic({ message }) {
 function FlatView({
   module: mod, components, signalOwners, hasErrors, design, onGateClick,
   hovered, setHovered, hoveredSignal, setHoveredSignal,
+  logicIssues = [],
 }) {
+  const compIssueMap = useMemo(
+    () => attachIssuesToComponents(components, logicIssues),
+    [components, logicIssues],
+  )
   const COL_INPUT_X = 80
   const COL_COMP_X = 320
   const COL_OUTPUT_X = 560
@@ -1475,6 +1598,7 @@ function FlatView({
       display: 'flex', flexDirection: 'column', position: 'relative',
     }}>
       {hasErrors && <TopologyBanner />}
+      <IssueBanner logicIssues={logicIssues} />
 
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '10px' }}>
         <svg
@@ -1521,21 +1645,40 @@ function FlatView({
           ))}
 
           {/* Components */}
-          {layout.map((r) => (
-            <g key={`c-${r.index}`} transform={`translate(${r.cx}, ${r.cy})`}
-               onMouseEnter={() => setHovered(r.index)}
-               onMouseLeave={() => setHovered(null)}
-               onClick={() => {
-                 if (onGateClick) {
-                   const ln = findSourceLine(design || '', r.comp.source)
-                   onGateClick(ln, r.comp.source)
-                 }
-               }}
-               style={{ cursor: 'pointer' }}
-            >
-              {r.render.glyph}
-            </g>
-          ))}
+          {layout.map((r) => {
+            const issues = compIssueMap.get(r.index)
+            const issueColor = severityColor(issues)
+            return (
+              <g key={`c-${r.index}`} transform={`translate(${r.cx}, ${r.cy})`}
+                 onMouseEnter={() => setHovered(r.index)}
+                 onMouseLeave={() => setHovered(null)}
+                 onClick={() => {
+                   if (onGateClick) {
+                     const ln = issues?.[0]?.line
+                       ?? findSourceLine(design || '', r.comp.source)
+                     onGateClick(ln, r.comp.source)
+                   }
+                 }}
+                 style={{ cursor: 'pointer' }}
+              >
+                {/* Re-tint the glyph stroke when this component carries a
+                    validation issue. Wrapping in a <g> with `color` lets
+                    the existing `currentColor` strokes inherit it. */}
+                {issueColor ? (
+                  <g style={{ color: issueColor }}>
+                    {r.render.glyph}
+                  </g>
+                ) : (
+                  r.render.glyph
+                )}
+                <ComponentIssueBadge
+                  issues={issues}
+                  w={r.render.w || 80}
+                  h={r.render.h || 50}
+                />
+              </g>
+            )
+          })}
 
           {/* Primary outputs */}
           {primaryOutputs.map((o) => {
@@ -1572,7 +1715,7 @@ function FlatView({
 
 // ----------------------------- Hierarchical view ----------------------------
 
-function HierarchicalView({ module: mod, template, interfaceType, hasErrors }) {
+function HierarchicalView({ module: mod, template, interfaceType, hasErrors, logicIssues = [] }) {
   const W = 620, H = 460
   const OUTER_PAD_L = 170
   const OUTER_PAD_R = 160
@@ -1608,6 +1751,7 @@ function HierarchicalView({ module: mod, template, interfaceType, hasErrors }) {
       display: 'flex', flexDirection: 'column', position: 'relative',
     }}>
       {hasErrors && <TopologyBanner />}
+      <IssueBanner logicIssues={logicIssues} />
       <div style={{
         padding: '6px 12px', fontSize: '10px', fontFamily: "'JetBrains Mono', monospace",
         letterSpacing: '0.5px', color: 'var(--text-dim)',
@@ -1768,7 +1912,7 @@ function subLabel(kind) {
 
 // ----------------------------- Module fallback -----------------------------
 
-function ModuleFallbackView({ module: mod, hasErrors }) {
+function ModuleFallbackView({ module: mod, hasErrors, logicIssues = [] }) {
   // Detailed block rendering with EVERY port labelled. Never shows the plain
   // rough.js DiagramView — this is an enriched alternative.
   const inputs = (mod.ports || []).filter(p => p.dir === 'input')
@@ -1784,6 +1928,7 @@ function ModuleFallbackView({ module: mod, hasErrors }) {
       display: 'flex', flexDirection: 'column', position: 'relative',
     }}>
       {hasErrors && <TopologyBanner />}
+      <IssueBanner logicIssues={logicIssues} />
       <div style={{
         padding: '6px 12px', fontSize: '10px', fontFamily: "'JetBrains Mono', monospace",
         letterSpacing: '0.5px', color: 'var(--text-dim)',
