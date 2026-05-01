@@ -191,12 +191,17 @@ def _fix_carry_logic(verilog: str) -> str:
 
     The LLM frequently writes lines like
 
-        carry_out <= (a + b) > 4'd15;     // always 0 — natural truncation
-        carry_out <= (a - b) < 4'd0;      // always 0 — unsigned compare
+        carry_out <= (a + b) > 4'd15;       // always 0 — natural truncation
+        carry_out <= (a + b) > 4'b1111;     // same bug, binary literal
+        carry_out <= (a + b) > 4'hF;        // same bug, hex literal
+        carry_out <= (a - b) < 4'd0;        // always 0 — unsigned compare
+        carry_out <= (a - b) < 4'b0000;     // same, binary
+        carry_out <= (a - b) < 0;           // same, bare zero
 
-    Neither line ever fires for a 4-bit unsigned add/sub, so the testbench
-    runs but the carry / borrow signal is stuck at zero. This pass detects
-    the patterns and rewrites them to a properly typed equivalent:
+    Neither line ever fires for an unsigned add/sub, so the testbench runs
+    but the carry / borrow signal is stuck at zero. This pass detects the
+    patterns regardless of base (decimal, binary, hex, or bare zero) and
+    rewrites them to a properly typed equivalent:
 
         Overflow detection
             if a sibling line `<r> = a + b;` (or `<= a + b;`) exists in the
@@ -218,27 +223,98 @@ def _fix_carry_logic(verilog: str) -> str:
     # so we can preserve them when rewriting the line.
     case_prefix = r"(?P<prefix>(?:\d+'[bdhBDH][0-9a-fA-FxXzZ_]+|default|\w+)\s*:\s*)?"
 
+    # Verilog literal in any base (e.g. 4'd15, 4'b1111, 4'hF, 8'h00FF, 0).
+    # Captured groups: width (may be empty), base char (b/d/h/o, may be
+    # empty when the literal is bare like "0"), value digits.
+    sized_lit = r"(?:(?P<width>\d+)'(?P<base>[bBdDhHoO]))?(?P<value>[0-9a-fA-F_]+)"
+
     overflow_re = re.compile(
         r'^(?P<indent>\s*)' + case_prefix +
         r'(?P<carry>\w+)\s*(?P<op><=|=)\s*'
-        r'\(\s*(?P<a>\w+)\s*\+\s*(?P<b>\w+)\s*\)\s*>\s*'
-        r"(?P<width>\d+)'[dD](?P<value>\d+)\s*;\s*$"
+        r'\(\s*(?P<a>\w+)\s*\+\s*(?P<b>\w+)\s*\)\s*>\s*' +
+        sized_lit + r'\s*;\s*$'
     )
 
     underflow_re = re.compile(
         r'^(?P<indent>\s*)' + case_prefix +
         r'(?P<carry>\w+)\s*(?P<op><=|=)\s*'
-        r'\(\s*(?P<a>\w+)\s*-\s*(?P<b>\w+)\s*\)\s*<\s*'
-        r"(?:\d+'[dD])?0\s*;\s*$"
+        r'\(\s*(?P<a>\w+)\s*-\s*(?P<b>\w+)\s*\)\s*<\s*' +
+        sized_lit + r'\s*;\s*$'
     )
 
-    def is_max_for_width(width: str, value: str) -> bool:
+    _BASE_RADIX = {'b': 2, 'B': 2, 'd': 10, 'D': 10,
+                    'h': 16, 'H': 16, 'o': 8, 'O': 8}
+
+    def _parse_literal(width_s, base_s, value_s):
+        """Return (width, value) for a Verilog literal, or (None, None)."""
         try:
-            w = int(width)
-            v = int(value)
+            width = int(width_s) if width_s else None
         except ValueError:
+            return None, None
+        clean = value_s.replace('_', '')
+        if base_s:
+            radix = _BASE_RADIX.get(base_s)
+            if radix is None:
+                return None, None
+            try:
+                value = int(clean, radix)
+            except ValueError:
+                return None, None
+        else:
+            # Bare literal — only allow plain decimal so we don't misread hex
+            if not clean.isdigit():
+                return None, None
+            try:
+                value = int(clean, 10)
+            except ValueError:
+                return None, None
+        return width, value
+
+    def is_max_for_width(width_s, base_s, value_s, fallback_width=None):
+        """True if the literal equals `2**N - 1` for SOME plausible width.
+
+        If the literal is sized (e.g. 4'b1111, 4'hF, 4'd15) we use that
+        width. If it's bare we fall back to the operand width so an
+        unsized 15 still matches a 4-bit add.
+        """
+        width, value = _parse_literal(width_s, base_s, value_s)
+        if value is None:
             return False
-        return w > 0 and v == (1 << w) - 1
+        w = width if width is not None else fallback_width
+        if not w or w <= 0:
+            return False
+        return value == (1 << w) - 1
+
+    def is_zero(width_s, base_s, value_s):
+        _, value = _parse_literal(width_s, base_s, value_s)
+        return value == 0
+
+    # Precompute declared widths so bare literals (e.g. "> 15") can still be
+    # recognised as the max for a 4-bit operand.
+    declared_widths: dict[str, int] = {}
+    port_match = re.search(r'module\s+\w+\s*\((.*?)\)\s*;', verilog, re.DOTALL)
+    if port_match:
+        for raw in port_match.group(1).split(','):
+            wm = re.match(
+                r'\s*(?:input|output|inout)\s+(?:reg\s+|wire\s+|logic\s+)?'
+                r'(?:signed\s+)?(?:\[(\d+):(\d+)\])?\s*(\w+)',
+                raw.strip(),
+            )
+            if wm:
+                if wm.group(1):
+                    width = abs(int(wm.group(1)) - int(wm.group(2))) + 1
+                else:
+                    width = 1
+                declared_widths[wm.group(3)] = width
+    for wm in re.finditer(
+        r'\b(?:wire|reg|logic)\s+(?:signed\s+)?(?:\[(\d+):(\d+)\])?\s*(\w+)\s*[;,]',
+        verilog,
+    ):
+        if wm.group(1):
+            width = abs(int(wm.group(1)) - int(wm.group(2))) + 1
+        else:
+            width = 1
+        declared_widths.setdefault(wm.group(3), width)
 
     lines = verilog.split('\n')
     drop_indices = set()
@@ -250,42 +326,47 @@ def _fix_carry_logic(verilog: str) -> str:
 
         # ---- Overflow pattern (carry <= (a + b) > <max>) ----
         m = overflow_re.match(line)
-        if m and is_max_for_width(m.group('width'), m.group('value')):
-            indent = m.group('indent')
-            prefix = m.group('prefix') or ''
-            carry = m.group('carry')
-            op = m.group('op')
+        if m:
             a = m.group('a')
             b = m.group('b')
+            operand_w = declared_widths.get(a) or declared_widths.get(b)
+            if is_max_for_width(
+                m.group('width'), m.group('base'), m.group('value'),
+                fallback_width=operand_w,
+            ):
+                indent = m.group('indent')
+                prefix = m.group('prefix') or ''
+                carry = m.group('carry')
+                op = m.group('op')
 
-            # Look for a sibling `<result> = a + b;` (blocking or non-blocking)
-            # nearby — typically the line immediately before the carry line —
-            # so we can fuse them into a single concatenation assignment.
-            dup_re = re.compile(
-                rf'^\s*(?:(?:\d+\'[bdhBDH][0-9a-fA-FxXzZ_]+|default|\w+)\s*:\s*)?'
-                rf'(\w+)\s*(?:<=|=)\s*{re.escape(a)}\s*\+\s*{re.escape(b)}\s*;\s*$'
-            )
-            duplicate_idx = None
-            duplicate_name = None
-            for j in range(max(0, i - 4), min(len(lines), i + 5)):
-                if j == i:
-                    continue
-                dm = dup_re.match(lines[j])
-                if dm and dm.group(1) != carry:
-                    duplicate_idx = j
-                    duplicate_name = dm.group(1)
-                    break
+                # Look for a sibling `<result> = a + b;` (blocking or non-blocking)
+                # nearby — typically the line immediately before the carry line —
+                # so we can fuse them into a single concatenation assignment.
+                dup_re = re.compile(
+                    rf'^\s*(?:(?:\d+\'[bdhBDH][0-9a-fA-FxXzZ_]+|default|\w+)\s*:\s*)?'
+                    rf'(\w+)\s*(?:<=|=)\s*{re.escape(a)}\s*\+\s*{re.escape(b)}\s*;\s*$'
+                )
+                duplicate_idx = None
+                duplicate_name = None
+                for j in range(max(0, i - 4), min(len(lines), i + 5)):
+                    if j == i:
+                        continue
+                    dm = dup_re.match(lines[j])
+                    if dm and dm.group(1) != carry:
+                        duplicate_idx = j
+                        duplicate_name = dm.group(1)
+                        break
 
-            if duplicate_idx is not None and duplicate_name:
-                out_lines[i] = f'{indent}{prefix}{{{carry}, {duplicate_name}}} {op} {a} + {b};'
-                drop_indices.add(duplicate_idx)
-            else:
-                out_lines[i] = f'{indent}{prefix}{carry} {op} (({a} + {b}) < {a});'
-            continue
+                if duplicate_idx is not None and duplicate_name:
+                    out_lines[i] = f'{indent}{prefix}{{{carry}, {duplicate_name}}} {op} {a} + {b};'
+                    drop_indices.add(duplicate_idx)
+                else:
+                    out_lines[i] = f'{indent}{prefix}{carry} {op} (({a} + {b}) < {a});'
+                continue
 
         # ---- Underflow / borrow pattern (carry <= (a - b) < 0) ----
         m = underflow_re.match(line)
-        if m:
+        if m and is_zero(m.group('width'), m.group('base'), m.group('value')):
             indent = m.group('indent')
             prefix = m.group('prefix') or ''
             carry = m.group('carry')
