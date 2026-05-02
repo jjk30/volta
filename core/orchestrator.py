@@ -166,7 +166,10 @@ def _fix_duplicate_parameters(verilog: str) -> str:
         localparam [1:0] X = 2'b00;       // tracked separately? no — same scope
     """
 
+    print(f"[POST-PROCESS] Running _fix_duplicate_parameters on {len(verilog)} chars")
+
     seen: set[str] = set()
+    dropped: list[str] = []
     lines = verilog.split("\n")
     out_lines: list[str] = []
 
@@ -222,6 +225,7 @@ def _fix_duplicate_parameters(verilog: str) -> str:
             name = am.group(1)
             if name in seen:
                 # Duplicate — drop this item
+                dropped.append(name)
                 continue
             seen.add(name)
             kept.append(item)
@@ -234,41 +238,54 @@ def _fix_duplicate_parameters(verilog: str) -> str:
         rebuilt = f"{indent}{kw} {width}{', '.join(kept)};{tail}"
         out_lines.append(rebuilt)
 
+    if dropped:
+        print(f"[POST-PROCESS] _fix_duplicate_parameters dropped: {', '.join(dropped)}")
     return "\n".join(out_lines)
 
 
 def _fix_array_assignment(verilog: str) -> str:
-    """Replace SystemVerilog array-reset syntax with a Verilog-2005 for-loop.
+    """Replace whole-array reset assignments with a Verilog-2005 for-loop.
 
     The LLM frequently writes patterns like
 
-        always @(posedge clk) begin
-          if (rst) mem <= '{default:0};
+        if (rst) mem <= 0;                  // bare zero
+        if (rst) mem <= 8'b0;               // sized literal
+        if (rst) mem <= '0;                 // SV apostrophe-fill
+        if (rst) mem <= '{default: 0};      // SV apostrophe-brace
+        if (rst) mem <= '{default: '0};     // SV apostrophe-brace + fill
+        if (rst) mem  = {default: 0};       // unprimed brace, blocking
+
+    iverilog (and Yosys) reject all of these because Verilog-2005 has no
+    aggregate assignment for unpacked arrays. The fix wraps the assignment
+    in a NAMED begin/end block with a locally-scoped ``integer volta_i;``
+    and a for-loop that writes every element. The named block is required
+    so the loop variable is declared inside the procedural scope (some
+    Yosys configurations reject module-level integers).
+
+    Output shape::
+
+        begin : volta_reset_<arr>_<n>
+          integer volta_i;
+          for (volta_i = 0; volta_i < <depth>; volta_i = volta_i + 1)
+            <arr>[volta_i] <op> <val>;
         end
 
-    or the unprimed variant ``mem <= {default:0};``. iverilog rejects both
-    because Verilog-2005 has no aggregate assignment for unpacked arrays.
+    The block ID includes both the array name and a unique counter so two
+    independent resets of the same array (in different always blocks)
+    don't collide.
 
-    The fix:
+    Steps:
       1. Scan the module for unpacked-array declarations
-         ``reg [W:0] <name> [<lo>:<hi>];`` and remember each array's depth
-         (either an integer literal or a parametric expression like ``DEPTH``).
-      2. For every line of the form ``<arr> <op> '{default:<v>};`` /
-         ``<arr> <op> {default:<v>};`` replace it with a for-loop:
-             for (volta_i = 0; volta_i < <depth>; volta_i = volta_i + 1)
-               <arr>[volta_i] <op> <v>;
-         using the same assignment operator (``=`` or ``<=``).
-      3. Inject ``integer volta_i;`` after the closing port-list
-         ``);`` if the loop is referenced and the variable isn't already
-         declared.
-
-    Multiple arrays in the same module each get their own loop with the
-    correct depth.
+         ``reg [W:0] <name> [<lo>:<hi>];`` and remember each array's depth.
+      2. Per line, detect any ``<arr> <op> <fill>;`` whose LHS is a known
+         array, decode the per-element value, and rewrite into the named
+         block + for-loop above. Multi-line output preserves the original
+         indentation.
     """
 
+    print(f"[POST-PROCESS] Running _fix_array_assignment on {len(verilog)} chars")
+
     # 1. Discover array declarations.
-    # Match e.g. `reg [7:0] mem [0:255];` or `reg [W-1:0] data [DEPTH-1:0];`
-    # or `reg mem [0:DEPTH-1];` (no width).
     array_re = re.compile(
         r"\b(?:reg|wire|logic)\s+(?:signed\s+)?(?:\[[^\]]+\]\s+)?"
         r"(?P<name>\w+)\s*\[(?P<range>[^\]]+)\]\s*;"
@@ -283,51 +300,85 @@ def _fix_array_assignment(verilog: str) -> str:
             array_depth[name] = depth
 
     if not array_depth:
-        return verilog  # no arrays → nothing to rewrite
+        return verilog
 
-    # 2. Rewrite every `<arr> <op> '{default:<v>};` (or unprimed form) found
-    # in the source. We use an inline (non-line-anchored) regex so prefixes
-    # like `if (rst) <arr> <= ...` keep working and the rest of the line
-    # (including the `if (...)` part) stays intact around the substitution.
-    assign_re = re.compile(
-        r"\b(?P<lhs>\w+)\s*(?P<op><=|=)\s*"
-        r"'?\{\s*default\s*:\s*(?P<val>[^}]+?)\s*\}\s*;"
+    # 2. Per-line: detect any whole-array fill and rewrite it.
+    # We capture the leading indent so we can re-emit the rewritten block
+    # with consistent indentation.  The `rhs` alternation matches every
+    # form we've seen the LLM use:
+    #   '{default:V}  /  {default:V}  /  '{default:'V}
+    #   '0           /  '1           (SV apostrophe-fill)
+    #   8'b0  /  4'h0  /  3'd5       (sized literal)
+    #   0  /  16  /  255             (bare integer)
+    fill_pattern = re.compile(
+        r"^(?P<indent>\s*)(?P<lhs>\w+)\s*(?P<op><=|=)\s*"
+        r"(?P<rhs>"
+        r"'?\{\s*default\s*:\s*(?:'?[^}]+?)\s*\}|"   # {default:0} / '{default:0} / '{default:'0}
+        r"'[01]|"                                    # '0 / '1
+        r"\d+'[bBdDhHoO][0-9a-fA-FxXzZ_]+|"          # 8'b0 / 4'hF / 3'd5
+        r"\d+"                                       # 0 / 16 / 255
+        r")\s*;\s*(?P<tail>.*)$"
     )
 
-    used_loop = False
+    def extract_value(rhs: str) -> str:
+        """Unwrap the SV/Verilog fill expression into the per-element value."""
+        s = rhs.strip()
+        # `{default:V}` or `'{default:V}` — pick out V
+        mb = re.match(r"'?\{\s*default\s*:\s*(.+?)\s*\}\s*$", s)
+        if mb:
+            v = mb.group(1).strip()
+            # Strip the SV apostrophe if the inner value uses it (e.g. '0)
+            if v.startswith("'") and len(v) >= 2 and v[1] in "01":
+                return v[1:]
+            return v
+        # `'0` / `'1` — SV apostrophe-fill, just the digit
+        if s.startswith("'") and len(s) >= 2 and s[1] in "01":
+            return s[1:]
+        # Sized literal or bare integer — keep as-is
+        return s
 
-    def replace(m):
-        nonlocal used_loop
+    used_loops = []   # collected (lhs, depth) pairs, for the debug print
+    counter = 0
+    out_lines: list[str] = []
+
+    for raw in verilog.split("\n"):
+        m = fill_pattern.match(raw)
+        if not m:
+            out_lines.append(raw)
+            continue
         lhs = m.group("lhs")
-        op = m.group("op")
-        val = m.group("val").strip()
         if lhs not in array_depth:
-            return m.group(0)
-        used_loop = True
+            out_lines.append(raw)
+            continue
+
+        indent = m.group("indent")
+        op = m.group("op")
+        val = extract_value(m.group("rhs"))
+        tail = m.group("tail")
         depth = array_depth[lhs]
-        return (
-            f"for (volta_i = 0; volta_i < {depth}; "
-            f"volta_i = volta_i + 1) {lhs}[volta_i] {op} {val};"
+        counter += 1
+        block_id = f"volta_reset_{lhs}_{counter}"
+        used_loops.append((lhs, depth))
+
+        sub_indent = indent + "  "
+        out_lines.append(f"{indent}begin : {block_id}")
+        out_lines.append(f"{sub_indent}integer volta_i;")
+        out_lines.append(
+            f"{sub_indent}for (volta_i = 0; volta_i < {depth}; "
+            f"volta_i = volta_i + 1)"
         )
+        out_lines.append(f"{sub_indent}  {lhs}[volta_i] {op} {val};")
+        out_lines.append(f"{indent}end")
+        if tail.strip():
+            # Preserve any trailing comment on the original line so we
+            # don't silently drop "// reset all entries" annotations.
+            out_lines.append(f"{indent}{tail}")
 
-    text = assign_re.sub(replace, verilog)
+    if used_loops:
+        summary = ", ".join(f"{lhs}({depth})" for lhs, depth in used_loops)
+        print(f"[POST-PROCESS] _fix_array_assignment rewrote {len(used_loops)} array reset(s): {summary}")
 
-    if not used_loop:
-        return text
-
-    # 3. Make sure `integer volta_i;` is declared somewhere in the module.
-    if re.search(r"\binteger\s+volta_i\s*;", text):
-        return text
-
-    # Insert just after the closing `);` of the module port list — that's
-    # before the first always block / declaration body.
-    hdr = re.search(r"module\s+\w+\s*\([\s\S]*?\)\s*;", text)
-    if hdr:
-        insert_pos = hdr.end()
-        return text[:insert_pos] + "\n  integer volta_i;" + text[insert_pos:]
-
-    # Fallback: prepend at the very top
-    return "  integer volta_i;\n" + text
+    return "\n".join(out_lines)
 
 
 def _array_depth_expr(range_text: str) -> str | None:
