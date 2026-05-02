@@ -214,6 +214,7 @@ def correct(
     verilog: str,
     model: str = "qwen2.5-coder:7b",
     max_attempts: int = MAX_ATTEMPTS,
+    post_process=None,
 ) -> dict:
     """
     Run verilog through Yosys. If errors are found, classify them,
@@ -287,6 +288,18 @@ def correct(
         if not fixed or "module" not in fixed:
             print(f"  LLM returned no usable Verilog. Retrying...")
             continue
+
+        # Run the orchestrator's post-processor on every freshly-generated
+        # iteration so the same bug-cleanup (duplicate parameters,
+        # whole-array resets, parameters-before-ports, etc.) that ran on
+        # the original LLM output also runs on each correction attempt.
+        # Without this, the LLM can re-introduce the same bug on every
+        # retry and the loop never converges.
+        if post_process is not None:
+            try:
+                fixed = post_process(fixed)
+            except Exception as e:
+                print(f"  post_process failed (non-fatal): {e}")
 
         code = fixed
 

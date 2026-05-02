@@ -130,11 +130,16 @@ cases. Start with `module` and end with `endmodule`. No explanation."""
 
 def _fix_verilog(verilog: str) -> str:
     """Apply all post-processing fixes to Verilog code."""
+    # The first three fixes run BEFORE everything else: they normalise
+    # the module header and remove parameter / array-reset bugs that
+    # downstream passes (e.g. `_fix_undeclared_inputs`) would otherwise
+    # mistake for missing wires.
     code = verilog
-    code = _fix_reg_declarations(code)
-    code = _fix_duplicate_reg_declarations(code)
+    code = _fix_parameters_before_ports(code)
     code = _fix_duplicate_parameters(code)
     code = _fix_array_assignment(code)
+    code = _fix_reg_declarations(code)
+    code = _fix_duplicate_reg_declarations(code)
     code = _fix_missing_semicolons(code)
     code = _fix_undeclared_regs(code)
     code = _fix_undeclared_inputs(code)
@@ -146,287 +151,195 @@ def _fix_verilog(verilog: str) -> str:
 
 
 def _fix_duplicate_parameters(verilog: str) -> str:
-    """Drop duplicate ``parameter`` / ``localparam`` names.
+    """Remove duplicate parameter/localparam declarations."""
+    lines = verilog.split('\n')
+    seen_params = set()
+    result_lines = []
 
-    The LLM occasionally regenerates the same FSM state name twice when
-    the prompt is ambiguous (e.g. two ``parameter RED = 2'b00;`` lines, or
-    duplicate ``INIT`` in a vending-machine spec). iverilog rejects the
-    second declaration with "already declared in this scope".
+    for line in lines:
+        stripped = line.strip()
 
-    The fix walks parameter declarations top-to-bottom and removes any
-    name that's already been seen. Multi-name single-line declarations
-    keep their non-duplicate names; if every name on a line was a
-    duplicate, the whole line is dropped.
-
-    Single-line examples handled:
-        parameter RED = 2'b00;            // first occurrence: keep
-        parameter RED = 2'b11;            // duplicate: drop
-        parameter A = 2'b00, B = 2'b01;   // both new: keep both
-        parameter A = 2'b00, A = 2'b11;   // second A duplicate: drop it
-        localparam [1:0] X = 2'b00;       // tracked separately? no — same scope
-    """
-
-    print(f"[POST-PROCESS] Running _fix_duplicate_parameters on {len(verilog)} chars")
-
-    seen: set[str] = set()
-    dropped: list[str] = []
-    lines = verilog.split("\n")
-    out_lines: list[str] = []
-
-    # Match `parameter` or `localparam` (with optional [W:0] width prefix)
-    # followed by a comma-separated list of `NAME = VALUE` pairs, terminated
-    # with `;`. We accept `;` ending the same line for simplicity.
-    decl_re = re.compile(
-        r"^(?P<indent>\s*)(?P<keyword>parameter|localparam)\s+"
-        r"(?P<width>(?:signed\s+)?(?:\[[^\]]+\]\s+)?)"
-        r"(?P<body>[^;]+);(?P<tail>.*)$"
-    )
-
-    for raw in lines:
-        m = decl_re.match(raw)
-        if not m:
-            out_lines.append(raw)
+        # Check for single parameter declaration: parameter NAME = VALUE;
+        single_match = re.match(r'^(parameter|localparam)\s+(\w+)\s*=', stripped)
+        if single_match:
+            name = single_match.group(2)
+            if name in seen_params:
+                # Skip this duplicate line entirely
+                continue
+            seen_params.add(name)
+            result_lines.append(line)
             continue
 
-        indent = m.group("indent")
-        kw = m.group("keyword")
-        width = m.group("width")
-        body = m.group("body")
-        tail = m.group("tail")
-
-        # Split the body on commas at depth 0 to preserve any commas inside
-        # value expressions like {1'b0, 1'b1} or function calls.
-        items: list[str] = []
-        depth = 0
-        cur = []
-        for ch in body:
-            if ch in "({[":
-                depth += 1
-                cur.append(ch)
-            elif ch in ")}]":
-                depth -= 1
-                cur.append(ch)
-            elif ch == "," and depth == 0:
-                items.append("".join(cur).strip())
-                cur = []
-            else:
-                cur.append(ch)
-        if cur:
-            items.append("".join(cur).strip())
-
-        kept: list[str] = []
-        for item in items:
-            # Each item is `NAME = VALUE` (allowing whitespace around `=`).
-            am = re.match(r"^([A-Za-z_]\w*)\s*=\s*(.+)$", item)
-            if not am:
-                # Unexpected shape — keep verbatim
-                kept.append(item)
+        # Check for parameter with bit range: parameter [N:0] NAME = VALUE;
+        range_match = re.match(r'^(parameter|localparam)\s+\[.*?\]\s+(\w+)\s*=', stripped)
+        if range_match:
+            name = range_match.group(2)
+            if name in seen_params:
                 continue
-            name = am.group(1)
-            if name in seen:
-                # Duplicate — drop this item
-                dropped.append(name)
-                continue
-            seen.add(name)
-            kept.append(item)
-
-        if not kept:
-            # Every declared name on this line was a duplicate — drop the
-            # whole line (and anything trailing on it like a comment).
+            seen_params.add(name)
+            result_lines.append(line)
             continue
 
-        rebuilt = f"{indent}{kw} {width}{', '.join(kept)};{tail}"
-        out_lines.append(rebuilt)
+        result_lines.append(line)
 
-    if dropped:
-        print(f"[POST-PROCESS] _fix_duplicate_parameters dropped: {', '.join(dropped)}")
-    return "\n".join(out_lines)
+    fixed = '\n'.join(result_lines)
+    if fixed != verilog:
+        print(f"[POST-PROCESS] _fix_duplicate_parameters: removed {len(verilog.split(chr(10))) - len(result_lines)} duplicate lines")
+    return fixed
 
 
 def _fix_array_assignment(verilog: str) -> str:
-    """Replace whole-array reset assignments with a Verilog-2005 for-loop.
+    """Replace whole-array assignments with for-loops (Verilog-2005 compatible)."""
+    # Find all memory array declarations: reg [W:0] name [0:D] or reg [W:0] name [D:0]
+    array_pattern = re.compile(r'reg\s+\[(\d+):0\]\s+(\w+)\s+\[0?:?(\d+)\]')
+    arrays = {}
+    for m in array_pattern.finditer(verilog):
+        width = int(m.group(1)) + 1
+        name = m.group(2)
+        depth = int(m.group(3)) + 1
+        arrays[name] = {'width': width, 'depth': depth}
 
-    The LLM frequently writes patterns like
-
-        if (rst) mem <= 0;                  // bare zero
-        if (rst) mem <= 8'b0;               // sized literal
-        if (rst) mem <= '0;                 // SV apostrophe-fill
-        if (rst) mem <= '{default: 0};      // SV apostrophe-brace
-        if (rst) mem <= '{default: '0};     // SV apostrophe-brace + fill
-        if (rst) mem  = {default: 0};       // unprimed brace, blocking
-
-    iverilog (and Yosys) reject all of these because Verilog-2005 has no
-    aggregate assignment for unpacked arrays. The fix wraps the assignment
-    in a NAMED begin/end block with a locally-scoped ``integer volta_i;``
-    and a for-loop that writes every element. The named block is required
-    so the loop variable is declared inside the procedural scope (some
-    Yosys configurations reject module-level integers).
-
-    Output shape::
-
-        begin : volta_reset_<arr>_<n>
-          integer volta_i;
-          for (volta_i = 0; volta_i < <depth>; volta_i = volta_i + 1)
-            <arr>[volta_i] <op> <val>;
-        end
-
-    The block ID includes both the array name and a unique counter so two
-    independent resets of the same array (in different always blocks)
-    don't collide.
-
-    Steps:
-      1. Scan the module for unpacked-array declarations
-         ``reg [W:0] <name> [<lo>:<hi>];`` and remember each array's depth.
-      2. Per line, detect any ``<arr> <op> <fill>;`` whose LHS is a known
-         array, decode the per-element value, and rewrite into the named
-         block + for-loop above. Multi-line output preserves the original
-         indentation.
-    """
-
-    print(f"[POST-PROCESS] Running _fix_array_assignment on {len(verilog)} chars")
-
-    # 1. Discover array declarations.
-    array_re = re.compile(
-        r"\b(?:reg|wire|logic)\s+(?:signed\s+)?(?:\[[^\]]+\]\s+)?"
-        r"(?P<name>\w+)\s*\[(?P<range>[^\]]+)\]\s*;"
-    )
-
-    array_depth: dict[str, str] = {}
-    for m in array_re.finditer(verilog):
-        name = m.group("name")
-        rng = m.group("range").strip()
-        depth = _array_depth_expr(rng)
-        if depth is not None:
-            array_depth[name] = depth
-
-    if not array_depth:
+    if not arrays:
         return verilog
 
-    # 2. Per-line: detect any whole-array fill and rewrite it.
-    # We capture the leading indent so we can re-emit the rewritten block
-    # with consistent indentation.  The `rhs` alternation matches every
-    # form we've seen the LLM use:
-    #   '{default:V}  /  {default:V}  /  '{default:'V}
-    #   '0           /  '1           (SV apostrophe-fill)
-    #   8'b0  /  4'h0  /  3'd5       (sized literal)
-    #   0  /  16  /  255             (bare integer)
-    fill_pattern = re.compile(
-        r"^(?P<indent>\s*)(?P<lhs>\w+)\s*(?P<op><=|=)\s*"
-        r"(?P<rhs>"
-        r"'?\{\s*default\s*:\s*(?:'?[^}]+?)\s*\}|"   # {default:0} / '{default:0} / '{default:'0}
-        r"'[01]|"                                    # '0 / '1
-        r"\d+'[bBdDhHoO][0-9a-fA-FxXzZ_]+|"          # 8'b0 / 4'hF / 3'd5
-        r"\d+"                                       # 0 / 16 / 255
-        r")\s*;\s*(?P<tail>.*)$"
-    )
+    modified = False
 
-    def extract_value(rhs: str) -> str:
-        """Unwrap the SV/Verilog fill expression into the per-element value."""
-        s = rhs.strip()
-        # `{default:V}` or `'{default:V}` — pick out V
-        mb = re.match(r"'?\{\s*default\s*:\s*(.+?)\s*\}\s*$", s)
-        if mb:
-            v = mb.group(1).strip()
-            # Strip the SV apostrophe if the inner value uses it (e.g. '0)
-            if v.startswith("'") and len(v) >= 2 and v[1] in "01":
-                return v[1:]
-            return v
-        # `'0` / `'1` — SV apostrophe-fill, just the digit
-        if s.startswith("'") and len(s) >= 2 and s[1] in "01":
-            return s[1:]
-        # Sized literal or bare integer — keep as-is
-        return s
+    for arr_name, info in arrays.items():
+        width = info['width']
+        depth = info['depth']
 
-    used_loops = []   # collected (lhs, depth) pairs, for the debug print
-    counter = 0
-    out_lines: list[str] = []
+        # Pattern 1: arr_name <= 0; or arr_name <= '{default: 0}; or arr_name = 0;
+        patterns = [
+            re.compile(r"(\s*)" + re.escape(arr_name) + r"\s*<=\s*'\{default\s*:\s*'?0\}\s*;"),
+            re.compile(r"(\s*)" + re.escape(arr_name) + r"\s*<=\s*0\s*;"),
+            re.compile(r"(\s*)" + re.escape(arr_name) + r"\s*=\s*0\s*;"),
+            re.compile(r"(\s*)" + re.escape(arr_name) + r"\s*<=\s*\d+'[bBdDhH]0+\s*;"),
+        ]
 
-    for raw in verilog.split("\n"):
-        m = fill_pattern.match(raw)
-        if not m:
-            out_lines.append(raw)
-            continue
-        lhs = m.group("lhs")
-        if lhs not in array_depth:
-            out_lines.append(raw)
-            continue
+        for pat in patterns:
+            match = pat.search(verilog)
+            if match:
+                indent = match.group(1) if match.group(1) else '    '
+                # Use a named block so integer declaration is valid Verilog-2005
+                replacement = (
+                    f"{indent}begin : volta_rst_{arr_name}\n"
+                    f"{indent}  integer volta_i;\n"
+                    f"{indent}  for (volta_i = 0; volta_i < {depth}; volta_i = volta_i + 1)\n"
+                    f"{indent}    {arr_name}[volta_i] <= {width}'b0;\n"
+                    f"{indent}end"
+                )
+                verilog = verilog[:match.start()] + replacement + verilog[match.end():]
+                modified = True
+                break
 
-        indent = m.group("indent")
-        op = m.group("op")
-        val = extract_value(m.group("rhs"))
-        tail = m.group("tail")
-        depth = array_depth[lhs]
-        counter += 1
-        block_id = f"volta_reset_{lhs}_{counter}"
-        used_loops.append((lhs, depth))
-
-        sub_indent = indent + "  "
-        out_lines.append(f"{indent}begin : {block_id}")
-        out_lines.append(f"{sub_indent}integer volta_i;")
-        out_lines.append(
-            f"{sub_indent}for (volta_i = 0; volta_i < {depth}; "
-            f"volta_i = volta_i + 1)"
-        )
-        out_lines.append(f"{sub_indent}  {lhs}[volta_i] {op} {val};")
-        out_lines.append(f"{indent}end")
-        if tail.strip():
-            # Preserve any trailing comment on the original line so we
-            # don't silently drop "// reset all entries" annotations.
-            out_lines.append(f"{indent}{tail}")
-
-    if used_loops:
-        summary = ", ".join(f"{lhs}({depth})" for lhs, depth in used_loops)
-        print(f"[POST-PROCESS] _fix_array_assignment rewrote {len(used_loops)} array reset(s): {summary}")
-
-    return "\n".join(out_lines)
+    if modified:
+        print(f"[POST-PROCESS] _fix_array_assignment: replaced whole-array assignment with for-loop")
+    return verilog
 
 
-def _array_depth_expr(range_text: str) -> str | None:
-    """Parse the inside of `[...]` for an unpacked-array dimension and
-    return a Verilog expression for its depth.
+def _fix_parameters_before_ports(verilog: str) -> str:
+    """Move parameter/localparam declarations that appear BETWEEN the
+    `module NAME` line and the port-list to AFTER the closing `);`.
 
-    Examples:
-        "0:255"        → "256"
-        "255:0"        → "256"
-        "0:DEPTH-1"    → "DEPTH"
-        "DEPTH-1:0"    → "DEPTH"
-        "DEPTH"        → "DEPTH"
-        "0:N"          → "(N + 1)"
+    The LLM sometimes generates code like::
+
+        module sequence_detector
+          parameter IDLE = 2'b00;
+          parameter S1 = 2'b01;
+          input wire clk,
+          input wire din,
+          output reg detected
+        );
+
+    iverilog explodes with "unexpected TOK_INPUT" because parameters
+    can't sit between the module name and the port list. This fix walks
+    line-by-line to detect the pattern, then:
+
+      1. Inserts an opening `(` after `module NAME` if the module line
+         doesn't already have one.
+      2. Keeps the port declaration block intact (including the closing
+         `);` line).
+      3. Re-emits the stray parameter lines immediately AFTER the
+         closing `);`.
+
+    Modules that already place parameters correctly (after the port
+    list) are left alone.
     """
-    txt = range_text.strip()
 
-    # Plain numeric literal: `[256]` → depth 256
-    if re.match(r"^\s*\d+\s*$", txt):
-        return txt.strip()
+    lines = verilog.split('\n')
 
-    # Symbolic single-token (e.g. `[DEPTH]`)
-    if re.match(r"^\s*\w+\s*$", txt):
-        return txt.strip()
+    # 1. Find the `module NAME` line.
+    mod_idx = None
+    mod_name = None
+    for i, line in enumerate(lines):
+        m = re.match(r'^\s*module\s+(\w+)\b', line)
+        if m:
+            mod_idx = i
+            mod_name = m.group(1)
+            break
+    if mod_idx is None:
+        return verilog
 
-    # `lo:hi` or `hi:lo`
-    m = re.match(r"^\s*(.+?)\s*:\s*(.+?)\s*$", txt)
-    if not m:
-        return None
-    a, b = m.group(1).strip(), m.group(2).strip()
+    mod_line = lines[mod_idx]
+    has_open_paren_in_header = '(' in mod_line
 
-    # Both numeric: depth = |a - b| + 1
-    if a.isdigit() and b.isdigit():
-        return str(abs(int(a) - int(b)) + 1)
+    # 2. Walk forward looking for stray parameters BEFORE any port
+    # declaration. Stop at the first line that's neither blank, comment,
+    # parameter, nor `(` opener.
+    stray_param_indices = []
+    first_port_idx = None
+    j = mod_idx + 1
+    while j < len(lines):
+        stripped = lines[j].strip()
+        if stripped == '' or stripped.startswith('//'):
+            j += 1
+            continue
+        # An `(` line opens the port list — keep it in place.
+        if (not has_open_paren_in_header
+                and '(' in stripped
+                and not stripped.startswith('parameter')
+                and not stripped.startswith('localparam')):
+            has_open_paren_in_header = True
+            j += 1
+            continue
+        if re.match(r'(parameter|localparam)\s+', stripped):
+            stray_param_indices.append(j)
+            j += 1
+            continue
+        if re.match(r'(input|output|inout)\b', stripped):
+            first_port_idx = j
+            break
+        # Any other content — this isn't the malformed pattern.
+        return verilog
 
-    # One side is `<NAME>-1`, other is `0` → depth = NAME
-    for hi, lo in [(a, b), (b, a)]:
-        nm = re.match(r"^(\w+)\s*-\s*1$", hi)
-        if nm and lo == "0":
-            return nm.group(1)
+    if not stray_param_indices or first_port_idx is None:
+        return verilog
 
-    # Fallback for the generic `0:N` shape: depth = (N + 1)
-    if a == "0":
-        return f"({b} + 1)"
-    if b == "0":
-        return f"({a} + 1)"
+    # 3. Find the closing `);` of the port list.
+    close_idx = None
+    for k in range(first_port_idx, len(lines)):
+        if ');' in lines[k]:
+            close_idx = k
+            break
+    if close_idx is None:
+        return verilog
 
-    # Unknown shape — return the raw range so the user can review
-    return None
+    # 4. Rebuild:
+    #    pre-module → `module NAME (` → port lines → `);` → moved params →
+    #    rest-of-body
+    new_lines: list[str] = []
+    new_lines.extend(lines[:mod_idx])
+    if has_open_paren_in_header:
+        new_lines.append(mod_line)
+    else:
+        new_lines.append(f"module {mod_name} (")
+    new_lines.extend(lines[first_port_idx:close_idx + 1])
+    for k in stray_param_indices:
+        new_lines.append(lines[k])
+    new_lines.extend(lines[close_idx + 1:])
+
+    print(f"[POST-PROCESS] _fix_parameters_before_ports: moved {len(stray_param_indices)} parameter line(s) below port list")
+    return '\n'.join(new_lines)
 
 
 def _fix_number_literals(verilog: str) -> str:
@@ -1768,7 +1681,12 @@ def generate(prompt: str, model: str = "qwen2.5-coder:7b") -> dict:
         else:
             print(f"  Found {len(synth.errors)} error(s) — running auto-fix...")
             initial_errors = list(synth.errors)
-            result = correct_verilog(design, model=model)
+            # Pass _fix_verilog as the post-processor so each correction
+            # attempt's freshly-generated code runs through the same
+            # bug-cleanup pipeline (duplicate parameters, whole-array
+            # resets, parameters-before-ports, etc.). Without this, the
+            # LLM can re-introduce the same bug on every retry.
+            result = correct_verilog(design, model=model, post_process=_fix_verilog)
 
             correction = {
                 "ran": True,
