@@ -133,6 +133,8 @@ def _fix_verilog(verilog: str) -> str:
     code = verilog
     code = _fix_reg_declarations(code)
     code = _fix_duplicate_reg_declarations(code)
+    code = _fix_duplicate_parameters(code)
+    code = _fix_array_assignment(code)
     code = _fix_missing_semicolons(code)
     code = _fix_undeclared_regs(code)
     code = _fix_undeclared_inputs(code)
@@ -141,6 +143,239 @@ def _fix_verilog(verilog: str) -> str:
     code = _fix_number_literals(code)
     code = _strip_systemverilog(code)
     return code
+
+
+def _fix_duplicate_parameters(verilog: str) -> str:
+    """Drop duplicate ``parameter`` / ``localparam`` names.
+
+    The LLM occasionally regenerates the same FSM state name twice when
+    the prompt is ambiguous (e.g. two ``parameter RED = 2'b00;`` lines, or
+    duplicate ``INIT`` in a vending-machine spec). iverilog rejects the
+    second declaration with "already declared in this scope".
+
+    The fix walks parameter declarations top-to-bottom and removes any
+    name that's already been seen. Multi-name single-line declarations
+    keep their non-duplicate names; if every name on a line was a
+    duplicate, the whole line is dropped.
+
+    Single-line examples handled:
+        parameter RED = 2'b00;            // first occurrence: keep
+        parameter RED = 2'b11;            // duplicate: drop
+        parameter A = 2'b00, B = 2'b01;   // both new: keep both
+        parameter A = 2'b00, A = 2'b11;   // second A duplicate: drop it
+        localparam [1:0] X = 2'b00;       // tracked separately? no — same scope
+    """
+
+    seen: set[str] = set()
+    lines = verilog.split("\n")
+    out_lines: list[str] = []
+
+    # Match `parameter` or `localparam` (with optional [W:0] width prefix)
+    # followed by a comma-separated list of `NAME = VALUE` pairs, terminated
+    # with `;`. We accept `;` ending the same line for simplicity.
+    decl_re = re.compile(
+        r"^(?P<indent>\s*)(?P<keyword>parameter|localparam)\s+"
+        r"(?P<width>(?:signed\s+)?(?:\[[^\]]+\]\s+)?)"
+        r"(?P<body>[^;]+);(?P<tail>.*)$"
+    )
+
+    for raw in lines:
+        m = decl_re.match(raw)
+        if not m:
+            out_lines.append(raw)
+            continue
+
+        indent = m.group("indent")
+        kw = m.group("keyword")
+        width = m.group("width")
+        body = m.group("body")
+        tail = m.group("tail")
+
+        # Split the body on commas at depth 0 to preserve any commas inside
+        # value expressions like {1'b0, 1'b1} or function calls.
+        items: list[str] = []
+        depth = 0
+        cur = []
+        for ch in body:
+            if ch in "({[":
+                depth += 1
+                cur.append(ch)
+            elif ch in ")}]":
+                depth -= 1
+                cur.append(ch)
+            elif ch == "," and depth == 0:
+                items.append("".join(cur).strip())
+                cur = []
+            else:
+                cur.append(ch)
+        if cur:
+            items.append("".join(cur).strip())
+
+        kept: list[str] = []
+        for item in items:
+            # Each item is `NAME = VALUE` (allowing whitespace around `=`).
+            am = re.match(r"^([A-Za-z_]\w*)\s*=\s*(.+)$", item)
+            if not am:
+                # Unexpected shape — keep verbatim
+                kept.append(item)
+                continue
+            name = am.group(1)
+            if name in seen:
+                # Duplicate — drop this item
+                continue
+            seen.add(name)
+            kept.append(item)
+
+        if not kept:
+            # Every declared name on this line was a duplicate — drop the
+            # whole line (and anything trailing on it like a comment).
+            continue
+
+        rebuilt = f"{indent}{kw} {width}{', '.join(kept)};{tail}"
+        out_lines.append(rebuilt)
+
+    return "\n".join(out_lines)
+
+
+def _fix_array_assignment(verilog: str) -> str:
+    """Replace SystemVerilog array-reset syntax with a Verilog-2005 for-loop.
+
+    The LLM frequently writes patterns like
+
+        always @(posedge clk) begin
+          if (rst) mem <= '{default:0};
+        end
+
+    or the unprimed variant ``mem <= {default:0};``. iverilog rejects both
+    because Verilog-2005 has no aggregate assignment for unpacked arrays.
+
+    The fix:
+      1. Scan the module for unpacked-array declarations
+         ``reg [W:0] <name> [<lo>:<hi>];`` and remember each array's depth
+         (either an integer literal or a parametric expression like ``DEPTH``).
+      2. For every line of the form ``<arr> <op> '{default:<v>};`` /
+         ``<arr> <op> {default:<v>};`` replace it with a for-loop:
+             for (volta_i = 0; volta_i < <depth>; volta_i = volta_i + 1)
+               <arr>[volta_i] <op> <v>;
+         using the same assignment operator (``=`` or ``<=``).
+      3. Inject ``integer volta_i;`` after the closing port-list
+         ``);`` if the loop is referenced and the variable isn't already
+         declared.
+
+    Multiple arrays in the same module each get their own loop with the
+    correct depth.
+    """
+
+    # 1. Discover array declarations.
+    # Match e.g. `reg [7:0] mem [0:255];` or `reg [W-1:0] data [DEPTH-1:0];`
+    # or `reg mem [0:DEPTH-1];` (no width).
+    array_re = re.compile(
+        r"\b(?:reg|wire|logic)\s+(?:signed\s+)?(?:\[[^\]]+\]\s+)?"
+        r"(?P<name>\w+)\s*\[(?P<range>[^\]]+)\]\s*;"
+    )
+
+    array_depth: dict[str, str] = {}
+    for m in array_re.finditer(verilog):
+        name = m.group("name")
+        rng = m.group("range").strip()
+        depth = _array_depth_expr(rng)
+        if depth is not None:
+            array_depth[name] = depth
+
+    if not array_depth:
+        return verilog  # no arrays → nothing to rewrite
+
+    # 2. Rewrite every `<arr> <op> '{default:<v>};` (or unprimed form) found
+    # in the source. We use an inline (non-line-anchored) regex so prefixes
+    # like `if (rst) <arr> <= ...` keep working and the rest of the line
+    # (including the `if (...)` part) stays intact around the substitution.
+    assign_re = re.compile(
+        r"\b(?P<lhs>\w+)\s*(?P<op><=|=)\s*"
+        r"'?\{\s*default\s*:\s*(?P<val>[^}]+?)\s*\}\s*;"
+    )
+
+    used_loop = False
+
+    def replace(m):
+        nonlocal used_loop
+        lhs = m.group("lhs")
+        op = m.group("op")
+        val = m.group("val").strip()
+        if lhs not in array_depth:
+            return m.group(0)
+        used_loop = True
+        depth = array_depth[lhs]
+        return (
+            f"for (volta_i = 0; volta_i < {depth}; "
+            f"volta_i = volta_i + 1) {lhs}[volta_i] {op} {val};"
+        )
+
+    text = assign_re.sub(replace, verilog)
+
+    if not used_loop:
+        return text
+
+    # 3. Make sure `integer volta_i;` is declared somewhere in the module.
+    if re.search(r"\binteger\s+volta_i\s*;", text):
+        return text
+
+    # Insert just after the closing `);` of the module port list — that's
+    # before the first always block / declaration body.
+    hdr = re.search(r"module\s+\w+\s*\([\s\S]*?\)\s*;", text)
+    if hdr:
+        insert_pos = hdr.end()
+        return text[:insert_pos] + "\n  integer volta_i;" + text[insert_pos:]
+
+    # Fallback: prepend at the very top
+    return "  integer volta_i;\n" + text
+
+
+def _array_depth_expr(range_text: str) -> str | None:
+    """Parse the inside of `[...]` for an unpacked-array dimension and
+    return a Verilog expression for its depth.
+
+    Examples:
+        "0:255"        → "256"
+        "255:0"        → "256"
+        "0:DEPTH-1"    → "DEPTH"
+        "DEPTH-1:0"    → "DEPTH"
+        "DEPTH"        → "DEPTH"
+        "0:N"          → "(N + 1)"
+    """
+    txt = range_text.strip()
+
+    # Plain numeric literal: `[256]` → depth 256
+    if re.match(r"^\s*\d+\s*$", txt):
+        return txt.strip()
+
+    # Symbolic single-token (e.g. `[DEPTH]`)
+    if re.match(r"^\s*\w+\s*$", txt):
+        return txt.strip()
+
+    # `lo:hi` or `hi:lo`
+    m = re.match(r"^\s*(.+?)\s*:\s*(.+?)\s*$", txt)
+    if not m:
+        return None
+    a, b = m.group(1).strip(), m.group(2).strip()
+
+    # Both numeric: depth = |a - b| + 1
+    if a.isdigit() and b.isdigit():
+        return str(abs(int(a) - int(b)) + 1)
+
+    # One side is `<NAME>-1`, other is `0` → depth = NAME
+    for hi, lo in [(a, b), (b, a)]:
+        nm = re.match(r"^(\w+)\s*-\s*1$", hi)
+        if nm and lo == "0":
+            return nm.group(1)
+
+    # Fallback for the generic `0:N` shape: depth = (N + 1)
+    if a == "0":
+        return f"({b} + 1)"
+    if b == "0":
+        return f"({a} + 1)"
+
+    # Unknown shape — return the raw range so the user can review
+    return None
 
 
 def _fix_number_literals(verilog: str) -> str:
