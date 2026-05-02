@@ -189,51 +189,64 @@ def _fix_duplicate_parameters(verilog: str) -> str:
 
 
 def _fix_array_assignment(verilog: str) -> str:
-    """Replace whole-array assignments with for-loops (Verilog-2005 compatible)."""
-    # Find all memory array declarations: reg [W:0] name [0:D] or reg [W:0] name [D:0]
-    array_pattern = re.compile(r'reg\s+\[(\d+):0\]\s+(\w+)\s+\[0?:?(\d+)\]')
-    arrays = {}
-    for m in array_pattern.finditer(verilog):
-        width = int(m.group(1)) + 1
-        name = m.group(2)
-        depth = int(m.group(3)) + 1
-        arrays[name] = {'width': width, 'depth': depth}
+    """Replace whole-array assignments like ``mem <= 0;`` with for-loops.
 
-    if not arrays:
+    Conservative — fires ONLY when:
+      1. The LHS is the bare name of a declared unpacked array
+         (``reg [W:0] name [hi:lo];`` somewhere in the module).
+      2. The matched line is anchored with ``(\\n\\s+)`` so we never
+         swallow context from the previous line and never trigger on
+         ``mem[i] <= 0;`` (indexed) or on plain regs.
+    """
+    # Step 1: Find memory array declarations.
+    # Match: reg [7:0] mem [0:7]; OR reg [7:0] mem [7:0]; (either direction)
+    array_decls = re.findall(
+        r'reg\s+\[(\d+):0\]\s+(\w+)\s+\[(\d+):(\d+)\]',
+        verilog,
+    )
+
+    if not array_decls:
         return verilog
 
-    modified = False
+    arrays = {}
+    for match in array_decls:
+        width = int(match[0]) + 1
+        name = match[1]
+        idx_high = int(match[2])
+        idx_low = int(match[3])
+        depth = abs(idx_high - idx_low) + 1
+        arrays[name] = (width, depth)
 
-    for arr_name, info in arrays.items():
-        width = info['width']
-        depth = info['depth']
-
-        # Pattern 1: arr_name <= 0; or arr_name <= '{default: 0}; or arr_name = 0;
+    # Step 2: For each declared array, look for whole-array assignment.
+    # The (\n\s+) anchor guarantees the match starts at the beginning of a
+    # line (preceded by a newline and some indentation) — that prevents
+    # accidentally rewriting `mem[i] <= 0;` or matching mid-statement.
+    for arr_name, (width, depth) in arrays.items():
         patterns = [
-            re.compile(r"(\s*)" + re.escape(arr_name) + r"\s*<=\s*'\{default\s*:\s*'?0\}\s*;"),
-            re.compile(r"(\s*)" + re.escape(arr_name) + r"\s*<=\s*0\s*;"),
-            re.compile(r"(\s*)" + re.escape(arr_name) + r"\s*=\s*0\s*;"),
-            re.compile(r"(\s*)" + re.escape(arr_name) + r"\s*<=\s*\d+'[bBdDhH]0+\s*;"),
+            (re.compile(r'(\n\s+)' + re.escape(arr_name) + r'\s*<=\s*0\s*;'), '<='),
+            (re.compile(r'(\n\s+)' + re.escape(arr_name) + r"\s*<=\s*'\{default\s*:\s*'?0\}\s*;"), '<='),
+            (re.compile(r'(\n\s+)' + re.escape(arr_name) + r'\s*=\s*0\s*;'), '='),
         ]
 
-        for pat in patterns:
+        for pat, op in patterns:
             match = pat.search(verilog)
             if match:
-                indent = match.group(1) if match.group(1) else '    '
-                # Use a named block so integer declaration is valid Verilog-2005
+                indent = match.group(1)  # includes the leading newline
                 replacement = (
-                    f"{indent}begin : volta_rst_{arr_name}\n"
-                    f"{indent}  integer volta_i;\n"
-                    f"{indent}  for (volta_i = 0; volta_i < {depth}; volta_i = volta_i + 1)\n"
-                    f"{indent}    {arr_name}[volta_i] <= {width}'b0;\n"
+                    f"{indent}begin : volta_rst_{arr_name}"
+                    f"{indent}  integer volta_i;"
+                    f"{indent}  for (volta_i = 0; volta_i < {depth}; volta_i = volta_i + 1)"
+                    f"{indent}    {arr_name}[volta_i] {op} {width}'b0;"
                     f"{indent}end"
                 )
-                verilog = verilog[:match.start()] + replacement + verilog[match.end():]
-                modified = True
-                break
+                verilog = pat.sub(replacement, verilog, count=1)
+                print(
+                    f"[POST-PROCESS] _fix_array_assignment: replaced "
+                    f"'{arr_name} {op} 0' with for-loop "
+                    f"(depth={depth}, width={width})"
+                )
+                break  # Only fix once per array
 
-    if modified:
-        print(f"[POST-PROCESS] _fix_array_assignment: replaced whole-array assignment with for-loop")
     return verilog
 
 
