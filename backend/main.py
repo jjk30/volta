@@ -13,6 +13,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -333,6 +335,67 @@ def _symbol_to_prompt(name: str) -> str:
     return f"Design a {pretty}"
 
 
+# ---------------------------------------------------------------------------
+# Cached-template fast path. Symbols listed in TEMPLATE_MAP have hand-written
+# Verilog in core/templates/ that we can return instantly instead of paying
+# 30s+ for an Ollama round-trip. Anything not in this map still goes through
+# the full orchestrator pipeline.
+# ---------------------------------------------------------------------------
+
+TEMPLATE_MAP: dict[str, str] = {
+    "AND":        "and_gate.v",
+    "OR":         "or_gate.v",
+    "NOT":        "not_gate.v",
+    "NAND":       "nand_gate.v",
+    "NOR":        "nor_gate.v",
+    "XOR":        "xor_gate.v",
+    "XNOR":       "xnor_gate.v",
+    "AND3":       "and3_gate.v",
+    "OR3":        "or3_gate.v",
+    "NAND3":      "nand3_gate.v",
+    "NOR3":       "nor3_gate.v",
+    "XOR3":       "xor3_gate.v",
+    "AND4":       "and4_gate.v",
+    "OR4":        "or4_gate.v",
+    "NAND4":      "nand4_gate.v",
+    "NOR4":       "nor4_gate.v",
+    "HALF_ADDER": "half_adder.v",
+    "FULL_ADDER": "full_adder.v",
+    "MUX2":       "mux2.v",
+    "MUX4":       "mux4.v",
+    "DECODER":    "decoder2to4.v",
+    "ENCODER":    "encoder4to2.v",
+    "DFF":        "dff.v",
+}
+
+_TEMPLATES_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "..", "core", "templates"
+)
+
+
+def _normalize_symbol(name: str) -> str:
+    """Same normalization _symbol_to_prompt uses, exposed for cache lookup."""
+    return name.strip().upper().replace(" ", "_").replace("-", "_")
+
+
+def _load_template(symbol: str) -> Optional[str]:
+    """Return the cached Verilog for ``symbol`` or None if it's not cached.
+
+    Caller is responsible for emitting the timing log; this only does I/O.
+    """
+    key = _normalize_symbol(symbol)
+    fname = TEMPLATE_MAP.get(key)
+    if not fname:
+        return None
+    path = os.path.join(_TEMPLATES_DIR, fname)
+    try:
+        with open(path) as f:
+            return f.read()
+    except FileNotFoundError:
+        logger.warning("Template file missing for %s: %s", symbol, path)
+        return None
+
+
 def _parse_module_ports(verilog: str) -> dict:
     """Pull the module name and its ANSI-style port list out of generated
     Verilog. Returns {name, inputs, outputs} where inputs/outputs are lists
@@ -600,45 +663,108 @@ async def generate(req: GenerateRequest):
 
     # ----- Multi-module path: one orchestrator run per selected symbol ---
     if req.multi_module and len(req.symbols) >= 2:
-        sub_designs: list[str] = []
-        modules_info: list[dict] = []
+        # Each entry is keyed by the original input order so the wrapper
+        # builds modules in the same order the user picked them.
+        sub_designs_by_idx: dict[int, str] = {}
+        modules_info_by_idx: dict[int, dict] = {}
         agg_attempts = 0
         agg_passed = True
         agg_errors_fixed: list[str] = []
         agg_issues: list[dict] = []
 
-        for sym in req.symbols:
-            sub_prompt = _symbol_to_prompt(sym)
-            logger.info("Multi-module: generating %r → %r", sym, sub_prompt)
-            try:
-                sub_result = orchestrator_generate(sub_prompt)
-            except RuntimeError as e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Generation failed for {sym!r}: {e}. Is Ollama running?",
-                )
-            except Exception as e:
-                logger.exception("Unexpected error generating %r", sym)
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Generation failed for {sym!r}: {e}",
-                )
+        # Split symbols into cached (instant template read) vs LLM (Ollama).
+        cached_symbols: list[tuple[int, str]] = []   # (idx, sym)
+        llm_symbols: list[tuple[int, str]] = []      # (idx, sym)
+        for idx, sym in enumerate(req.symbols):
+            if _load_template(sym) is not None:
+                cached_symbols.append((idx, sym))
+            else:
+                llm_symbols.append((idx, sym))
 
-            sub_design = sub_result.get("design", "")
+        t_total_start = time.perf_counter()
+
+        # ---- 1) Pull all cached templates synchronously (each <1ms). -----
+        t_cache_start = time.perf_counter()
+        for idx, sym in cached_symbols:
+            t0 = time.perf_counter()
+            sub_design = _load_template(sym)
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            if not sub_design:
+                continue
             ports = _parse_module_ports(sub_design)
-            if ports.get("name"):
-                modules_info.append({
-                    "name": ports["name"],
-                    "inputs": ports["inputs"],
-                    "outputs": ports["outputs"],
-                })
-                sub_designs.append(sub_design)
+            if not ports.get("name"):
+                continue
+            mod_name = ports["name"]
+            modules_info_by_idx[idx] = {
+                "name": mod_name,
+                "inputs": ports["inputs"],
+                "outputs": ports["outputs"],
+            }
+            sub_designs_by_idx[idx] = sub_design
+            print(f"[CACHE] Loaded {mod_name}.v from template ({elapsed_ms:.1f}ms)")
+        t_cache = time.perf_counter() - t_cache_start
 
-            corr = sub_result.get("correction") or {}
-            agg_attempts += corr.get("attempts", 0)
-            agg_passed = agg_passed and corr.get("passed", False)
-            agg_errors_fixed.extend(corr.get("errors_fixed", []) or [])
-            agg_issues.extend(sub_result.get("logic_issues") or [])
+        # ---- 2) Generate the rest in parallel via ThreadPoolExecutor. ---
+        # Up to 4 concurrent Ollama calls; on Apple Silicon the GPU happily
+        # services multiple simultaneous requests on the same model.
+        def _run_orchestrator(idx: int, sym: str):
+            t0 = time.perf_counter()
+            sub_prompt = _symbol_to_prompt(sym)
+            logger.info("Multi-module: LLM generating %r → %r", sym, sub_prompt)
+            sub_result = orchestrator_generate(sub_prompt)
+            return idx, sym, sub_result, time.perf_counter() - t0
+
+        t_llm_start = time.perf_counter()
+        if llm_symbols:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(_run_orchestrator, idx, sym): (idx, sym)
+                    for idx, sym in llm_symbols
+                }
+                for future in as_completed(futures):
+                    idx, sym = futures[future]
+                    try:
+                        _, _, sub_result, elapsed = future.result()
+                    except RuntimeError as e:
+                        raise HTTPException(
+                            status_code=502,
+                            detail=f"Generation failed for {sym!r}: {e}. "
+                                   f"Is Ollama running?",
+                        )
+                    except Exception as e:
+                        logger.exception("Unexpected error generating %r", sym)
+                        raise HTTPException(
+                            status_code=502,
+                            detail=f"Generation failed for {sym!r}: {e}",
+                        )
+
+                    sub_design = sub_result.get("design", "")
+                    ports = _parse_module_ports(sub_design)
+                    if ports.get("name"):
+                        mod_name = ports["name"]
+                        modules_info_by_idx[idx] = {
+                            "name": mod_name,
+                            "inputs": ports["inputs"],
+                            "outputs": ports["outputs"],
+                        }
+                        sub_designs_by_idx[idx] = sub_design
+                        print(f"[LLM] Generated {mod_name} via Ollama "
+                              f"({elapsed:.1f}s)")
+                    else:
+                        print(f"[LLM] {sym} returned unparseable Verilog "
+                              f"({elapsed:.1f}s) — skipping")
+
+                    corr = sub_result.get("correction") or {}
+                    agg_attempts += corr.get("attempts", 0)
+                    agg_passed = agg_passed and corr.get("passed", False)
+                    agg_errors_fixed.extend(corr.get("errors_fixed", []) or [])
+                    agg_issues.extend(sub_result.get("logic_issues") or [])
+        t_llm = time.perf_counter() - t_llm_start
+
+        # Reassemble in the user's original symbol order.
+        ordered_indices = sorted(modules_info_by_idx.keys())
+        modules_info = [modules_info_by_idx[i] for i in ordered_indices]
+        sub_designs = [sub_designs_by_idx[i] for i in ordered_indices]
 
         if not modules_info:
             raise HTTPException(
@@ -646,8 +772,19 @@ async def generate(req: GenerateRequest):
                 detail="Multi-module generation produced no parseable modules.",
             )
 
+        # ---- 3) Build the top-level wrapper + testbench. ----------------
+        t_wrap_start = time.perf_counter()
         wrapper, tb = _create_wrapper_module(modules_info)
         combined_design = "\n\n".join(sub_designs + [wrapper])
+        t_wrap = time.perf_counter() - t_wrap_start
+
+        t_total = time.perf_counter() - t_total_start
+        print(
+            f"[MULTI-MODULE] {len(req.symbols)} symbols: "
+            f"{len(cached_symbols)} cached ({t_cache:.2f}s), "
+            f"{len(llm_symbols)} via LLM parallel ({t_llm:.2f}s), "
+            f"wrapper ({t_wrap:.2f}s), total: {t_total:.2f}s"
+        )
 
         correction = CorrectionInfo(
             ran=True,
