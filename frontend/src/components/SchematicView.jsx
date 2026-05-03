@@ -460,11 +460,366 @@ const INTERFACE_TEMPLATES = {
 }
 
 // ============================================================================
+// PART 5b — Multi-module parser (wrapper-with-instantiations format)
+// ----------------------------------------------------------------------------
+// When the user picks 2+ symbols from the library, the backend emits multiple
+// sub-module definitions followed by a `digital_logic_circuit` wrapper that
+// instantiates each one. We need to render every instantiation as its own
+// labelled gate / block — NOT decompose the assigns inside each sub-module.
+// ============================================================================
+
+/** Split a Verilog source into individual modules. Each entry exposes the
+ *  module name, its ANSI port-list text, and the body between `);` and
+ *  `endmodule`. */
+function splitModules(code) {
+  const out = []
+  const re = /module\s+(\w+)\s*\(([\s\S]*?)\)\s*;([\s\S]*?)\bendmodule\b/g
+  let m
+  while ((m = re.exec(code)) !== null) {
+    out.push({ name: m[1], portText: m[2], body: m[3] })
+  }
+  return out
+}
+
+/** Parse `<type> <instance_name>(.port(signal), ...);` instantiations from a
+ *  module body. Returns [{ moduleType, instanceName, ports: [{port, signal}] }].
+ *  Filters out non-instantiation matches by requiring at least one explicit
+ *  `.<port>(<signal>)` connection inside the parens. */
+function parseInstantiations(body) {
+  const insts = []
+  // Match `type name (...)` allowing a single level of nested parens inside.
+  const re = /\b(\w+)\s+(\w+)\s*\(\s*((?:[^()]|\([^()]*\))*)\)\s*;/g
+  let m
+  while ((m = re.exec(body)) !== null) {
+    // Skip Verilog statement keywords that the regex would otherwise greedily
+    // pick up (assign, always, generate, etc.) — these can't be a module type.
+    const moduleType = m[1]
+    if (/^(assign|always|initial|generate|case|casez|casex|endcase|begin|end|wire|reg|input|output|inout|parameter|localparam|module|endmodule|if|else|for|while|function|task|return|endfunction|endtask)$/i.test(moduleType)) continue
+    const instanceName = m[2]
+    const inner = m[3]
+    const ports = []
+    const portRe = /\.\s*(\w+)\s*\(\s*([^)]*?)\s*\)/g
+    let pm
+    while ((pm = portRe.exec(inner)) !== null) {
+      ports.push({ port: pm[1], signal: pm[2].trim() })
+    }
+    if (ports.length === 0) continue   // not a real instantiation
+    insts.push({ moduleType, instanceName, ports })
+  }
+  return insts
+}
+
+/** Map a sub-module type name to a renderer kind. Order matters — longer
+ *  patterns (NAND vs AND) must be tested before shorter ones. */
+function classifyInstance(moduleType) {
+  const n = moduleType.toLowerCase()
+  // Gate symbols (specific patterns first, then fallback to plain `and`/`or`)
+  if (/xnor/.test(n))                                return { kind: 'GATE', gateType: 'XNOR' }
+  if (/xor/.test(n))                                 return { kind: 'GATE', gateType: 'XOR' }
+  if (/nand/.test(n))                                return { kind: 'GATE', gateType: 'NAND' }
+  if (/(?:^|_)nor(?:\d|_|$)/.test(n))                return { kind: 'GATE', gateType: 'NOR' }
+  if (/(?:^|_)and(?:\d|_|$)/.test(n))                return { kind: 'GATE', gateType: 'AND' }
+  if (/(?:^|_)or(?:\d|_|$)/.test(n))                 return { kind: 'GATE', gateType: 'OR' }
+  if (/(?:^|_)not(?:\d|_|$)|inverter/.test(n))       return { kind: 'GATE', gateType: 'NOT' }
+
+  // Functional blocks (more specific names first)
+  if (/full[_\s]?adder|fadder|^fa$|_fa_/.test(n))    return { kind: 'BLOCK', label: 'FA',     subtitle: 'full adder' }
+  if (/half[_\s]?adder|hadder|^ha$|_ha_/.test(n))    return { kind: 'BLOCK', label: 'HA',     subtitle: 'half adder' }
+  if (/^mux|_mux/.test(n))                           return { kind: 'BLOCK', label: 'MUX',    subtitle: 'multiplexer', shape: 'trapezoid' }
+  if (/^demux|_demux/.test(n))                       return { kind: 'BLOCK', label: 'DEMUX',  subtitle: 'demultiplexer' }
+  if (/decoder|^dec\d/.test(n))                      return { kind: 'BLOCK', label: 'DEC',    subtitle: 'decoder' }
+  if (/encoder|^enc\d/.test(n))                      return { kind: 'BLOCK', label: 'ENC',    subtitle: 'encoder' }
+  if (/comparator|(?:^|_)cmp(?:_|$)/.test(n))        return { kind: 'BLOCK', label: 'CMP',    subtitle: 'comparator' }
+  if (/(?:^|_)alu(?:_|$|\d)/.test(n))                return { kind: 'BLOCK', label: 'ALU',    subtitle: 'arithmetic logic unit' }
+  if (/dff|d[_\s]?flip[_\s]?flop|^ff$|_ff_/.test(n)) return { kind: 'BLOCK', label: 'DFF',    subtitle: 'D flip-flop',  isFF: true }
+  if (/jkff|jk[_\s]?flip/.test(n))                   return { kind: 'BLOCK', label: 'JKFF',   subtitle: 'JK flip-flop', isFF: true }
+  if (/tff|t[_\s]?flip/.test(n))                     return { kind: 'BLOCK', label: 'TFF',    subtitle: 'T flip-flop',  isFF: true }
+  if (/srff|sr[_\s]?(?:latch|flip)/.test(n))         return { kind: 'BLOCK', label: 'SRFF',   subtitle: 'SR flip-flop', isFF: true }
+  if (/counter|^ctr/.test(n))                        return { kind: 'BLOCK', label: 'CTR',    subtitle: 'counter' }
+  if (/shift/.test(n))                               return { kind: 'BLOCK', label: 'SHIFT',  subtitle: 'shift register' }
+  if (/regfile/.test(n))                             return { kind: 'BLOCK', label: 'REGFILE',subtitle: 'register file' }
+  if (/(?:^|_)ram(?:_|$)/.test(n))                   return { kind: 'BLOCK', label: 'RAM',    subtitle: 'memory' }
+  if (/(?:^|_)rom(?:_|$)/.test(n))                   return { kind: 'BLOCK', label: 'ROM',    subtitle: 'memory' }
+  if (/register|^reg(?:_|\d|$)/.test(n))             return { kind: 'BLOCK', label: 'REG',    subtitle: 'register' }
+  if (/buffer|^buf/.test(n))                         return { kind: 'BLOCK', label: 'BUF',    subtitle: 'buffer' }
+  if (/tristate|tri[_\s]?state/.test(n))             return { kind: 'BLOCK', label: 'TRI',    subtitle: 'tri-state buffer' }
+
+  // Generic fallback: rectangle labelled with the module type
+  return { kind: 'BLOCK', label: moduleType, subtitle: '' }
+}
+
+/** Detect whether the design follows the multi-module wrapper format. Returns
+ *  null if it doesn't (caller falls back to single-module parsing). Otherwise
+ *  returns a { kind: 'flat', module, components, signalOwners, validation }
+ *  ready for the existing FlatView renderer. */
+function parseMultiModuleDesign(code) {
+  const clean = stripComments(code)
+  const modules = splitModules(clean)
+  if (modules.length < 2) return null
+
+  // Pick the module that actually has instantiations as the wrapper. Almost
+  // always this is the LAST module in the file (matches the backend's output
+  // format), but we walk backwards just in case the user pasted in a different
+  // ordering.
+  let wrapperIdx = -1
+  let wrapperInsts = []
+  for (let i = modules.length - 1; i >= 0; i--) {
+    const insts = parseInstantiations(modules[i].body)
+    if (insts.length > 0) { wrapperIdx = i; wrapperInsts = insts; break }
+  }
+  if (wrapperIdx === -1) return null
+
+  const wrapperRaw = modules[wrapperIdx]
+  const wrapperText = `module ${wrapperRaw.name} (${wrapperRaw.portText});${wrapperRaw.body}endmodule`
+  const wrapperInfo = parseModuleInfo(wrapperText)
+
+  // Parse each sub-module's port directions so we know which connections in
+  // the instantiation are inputs vs outputs.
+  const subInfoByName = new Map()
+  for (let i = 0; i < modules.length; i++) {
+    if (i === wrapperIdx) continue
+    const m = modules[i]
+    const subText = `module ${m.name} (${m.portText});${m.body}endmodule`
+    subInfoByName.set(m.name, parseModuleInfo(subText))
+  }
+
+  // Build a component list compatible with the existing FlatView
+  const components = []
+  const signalOwners = new Map()
+
+  for (const inst of wrapperInsts) {
+    const subInfo = subInfoByName.get(inst.moduleType)
+    const dirByName = new Map()
+    const widthByName = new Map()
+    for (const p of (subInfo?.ports || [])) {
+      dirByName.set(p.name, p.dir)
+      widthByName.set(p.name, p.width)
+    }
+
+    // When the sub-module isn't in the file (rare — unknown library cell),
+    // guess direction by port name. Common output names: y, q, out, sum,
+    // cout, valid, done, data_out. Everything else is treated as input.
+    const guessDir = (portName) => {
+      const n = portName.toLowerCase()
+      if (/^(y|out|q|sum|cout|valid|done|tx|rx_data|rx_valid|sclk|mosi|miso|cs|scl|sda|data_out|dout)$/.test(n)) return 'output'
+      return 'input'
+    }
+    const dirOf = (port) => dirByName.get(port) || guessDir(port)
+
+    const inputPorts  = inst.ports.filter(p => dirOf(p.port) === 'input')
+    const outputPorts = inst.ports.filter(p => dirOf(p.port) === 'output' || dirOf(p.port) === 'inout')
+
+    const cls = classifyInstance(inst.moduleType)
+    const source = `${inst.moduleType} ${inst.instanceName}(${inst.ports.map(p => `.${p.port}(${p.signal})`).join(', ')});`
+
+    // 2-input gates render as IEEE gate symbols. For 3+ input gates we still
+    // render the symbol but evenly distribute pins along the left edge (see
+    // the GATE renderer extension below).
+    if (cls.kind === 'GATE') {
+      // Drop clk/rst from the visible pin list — gates don't have them
+      const dataInputs = inputPorts.filter(p => !/^(clk|rst|reset|en)$/i.test(p.port))
+      const inputs = dataInputs.map((p, i) => ({
+        name: p.signal,
+        label: String.fromCharCode(65 + i),    // A, B, C, ...
+        portName: p.port,
+      }))
+      const outPort = outputPorts[0]
+      const outputs = outPort
+        ? [{ name: outPort.signal, label: outPort.signal, portName: outPort.port }]
+        : []
+      components.push({
+        kind: 'GATE',
+        gateType: cls.gateType,
+        inputs,
+        outputs,
+        source,
+        instanceName: inst.instanceName,
+        moduleType: inst.moduleType,
+        instanceMeta: { ports: inst.ports, dirByName, widthByName },
+      })
+    } else {
+      // Functional block — keep the actual port names as labels
+      const inputs = inputPorts.map(p => ({
+        name: p.signal,
+        label: p.port.toUpperCase(),
+        portName: p.port,
+        isClock: /^clk$/i.test(p.port),
+      }))
+      const outputs = outputPorts.map(p => ({
+        name: p.signal,
+        label: p.port.toUpperCase(),
+        portName: p.port,
+      }))
+      components.push({
+        kind: 'MOD_INSTANCE',
+        instanceLabel: cls.label,
+        instanceSubtitle: cls.subtitle || inst.moduleType,
+        inputs,
+        outputs,
+        source,
+        instanceName: inst.instanceName,
+        moduleType: inst.moduleType,
+        instanceMeta: { ports: inst.ports, dirByName, widthByName, isFF: cls.isFF },
+      })
+    }
+
+    for (const p of outputPorts) signalOwners.set(p.signal, components.length - 1)
+  }
+
+  // ---- Validation pass: surface obvious wiring problems --------------------
+  const validation = computeMultiModuleValidation(components, wrapperInfo)
+
+  return {
+    kind: 'flat',
+    module: wrapperInfo,
+    components,
+    signalOwners,
+    multiModule: true,
+    validation,
+  }
+}
+
+/** Detect multi-driver, floating, unused, width-mismatched, and looped
+ *  signals. Returns a `{ perComponentIssues, perSignalSeverity }` map.
+ *  perSignalSeverity is "error" | "warning" so the wire renderer can colour
+ *  affected wires red/amber. */
+function computeMultiModuleValidation(components, wrapperInfo) {
+  const perComp = new Map()         // component index → [{severity, message}]
+  const perSignal = new Map()       // signal name → "error" | "warning"
+  const addCompIssue = (idx, severity, message) => {
+    if (!perComp.has(idx)) perComp.set(idx, [])
+    perComp.get(idx).push({ severity, message })
+  }
+  const markSignal = (sig, sev) => {
+    const cur = perSignal.get(sig)
+    if (cur === 'error') return
+    if (sev === 'error' || !cur) perSignal.set(sig, sev)
+  }
+
+  // Build maps of producers/consumers per signal
+  const producers = new Map()       // signal → [component index]
+  const consumers = new Map()       // signal → [{ idx, port, width }]
+  components.forEach((c, idx) => {
+    for (const o of c.outputs || []) {
+      if (!producers.has(o.name)) producers.set(o.name, [])
+      producers.get(o.name).push(idx)
+    }
+    for (const i of c.inputs || []) {
+      if (!consumers.has(i.name)) consumers.set(i.name, [])
+      const w = c.instanceMeta?.widthByName?.get(i.portName)
+      consumers.get(i.name).push({ idx, port: i.portName, width: w })
+    }
+  })
+
+  const wrapperInputs  = new Set((wrapperInfo.ports || []).filter(p => p.dir === 'input').map(p => p.name))
+  const wrapperOutputs = new Set((wrapperInfo.ports || []).filter(p => p.dir === 'output').map(p => p.name))
+  const wrapperWidthByName = new Map((wrapperInfo.ports || []).map(p => [p.name, p.width]))
+
+  // 1. Multi-driver — same signal produced by ≥2 components
+  for (const [sig, prodList] of producers) {
+    if (prodList.length >= 2) {
+      markSignal(sig, 'error')
+      for (const idx of prodList) {
+        addCompIssue(idx, 'ERROR', `Multiple drivers on signal '${sig}'`)
+      }
+    }
+  }
+
+  // 2. Floating inputs — signal is consumed but neither produced internally
+  //    nor declared as a wrapper input
+  for (const [sig, consList] of consumers) {
+    if (producers.has(sig)) continue
+    if (wrapperInputs.has(sig)) continue
+    // Filter out integer constants and quoted Verilog literals
+    if (/^(?:\d+|'[bdho][0-9a-fA-FxXzZ_]+|\d+'[bdho][0-9a-fA-FxXzZ_]+)$/.test(sig)) continue
+    markSignal(sig, 'warning')
+    for (const c of consList) {
+      addCompIssue(c.idx, 'WARNING', `Floating input — signal '${sig}' has no driver`)
+    }
+  }
+
+  // 3. Unused outputs — wrapper declares an output but nothing produces it
+  for (const out of wrapperOutputs) {
+    if (!producers.has(out)) {
+      // Note: wrapper declares it but no instance drives it. Surface as a
+      // warning bound to no specific component.
+      markSignal(out, 'warning')
+    }
+  }
+
+  // 4. Width mismatch — signal width on the wrapper differs from a consumer's
+  //    expected port width
+  for (const [sig, consList] of consumers) {
+    const sigW = wrapperWidthByName.get(sig)
+    if (!sigW || sigW <= 1) continue
+    for (const c of consList) {
+      if (!c.width || c.width <= 0) continue
+      if (sigW !== c.width) {
+        markSignal(sig, 'warning')
+        addCompIssue(c.idx, 'WARNING',
+          `Width mismatch on '${sig}': ${sigW}-bit signal driving ${c.width}-bit port`)
+      }
+    }
+  }
+
+  // 5. Combinational loop — DFS over the producer→consumer graph, ignoring
+  //    sequential blocks (DFFs / flip-flops / registers) since they break
+  //    cycles via clock latching.
+  const adj = new Map()             // src component idx → [dst component idx]
+  components.forEach((c, idx) => {
+    if (c.instanceMeta?.isFF) return
+    for (const o of c.outputs || []) {
+      const sinks = consumers.get(o.name) || []
+      for (const sink of sinks) {
+        if (components[sink.idx]?.instanceMeta?.isFF) continue
+        if (!adj.has(idx)) adj.set(idx, [])
+        adj.get(idx).push(sink.idx)
+      }
+    }
+  })
+  const WHITE = 0, GREY = 1, BLACK = 2
+  const colour = new Array(components.length).fill(WHITE)
+  const looped = new Set()
+  const dfs = (u, stack) => {
+    colour[u] = GREY
+    stack.push(u)
+    for (const v of (adj.get(u) || [])) {
+      if (colour[v] === GREY) {
+        // Back-edge — every node from `v` to top-of-stack is in the cycle
+        const startIdx = stack.indexOf(v)
+        for (let i = startIdx; i < stack.length; i++) looped.add(stack[i])
+      } else if (colour[v] === WHITE) {
+        dfs(v, stack)
+      }
+    }
+    stack.pop()
+    colour[u] = BLACK
+  }
+  for (let i = 0; i < components.length; i++) {
+    if (colour[i] === WHITE) dfs(i, [])
+  }
+  for (const idx of looped) {
+    addCompIssue(idx, 'ERROR', 'Combinational loop detected')
+    for (const o of components[idx].outputs || []) markSignal(o.name, 'error')
+  }
+
+  return { perComponentIssues: perComp, perSignalSeverity: perSignal }
+}
+
+// ============================================================================
 // PART 6 — Top-level parse
 // ============================================================================
 
 function parseDesign(code) {
   if (!code || !code.trim()) return null
+
+  // Multi-module wrapper format takes precedence. When the design contains
+  // ≥2 modules and the last one has instantiations, render every instance
+  // as its own gate / block instead of decomposing the assigns inside each
+  // sub-module.
+  const multi = parseMultiModuleDesign(code)
+  if (multi) return multi
+
   const clean = stripComments(code)
   const mod = parseModuleInfo(clean)
 
@@ -913,7 +1268,7 @@ const MUTED = 'var(--text-dim)'
 const GATE_W = 80
 const GATE_H = 55
 
-function gatePinLayout(gateType) {
+function gatePinLayout(gateType, inputCount = 2) {
   switch (gateType) {
     case 'NOT':
       return { in: [{ x: -GATE_W / 2, y: 0 }], out: { x: GATE_W / 2, y: 0 } }
@@ -926,11 +1281,24 @@ function gatePinLayout(gateType) {
         ],
         out: { x: GATE_W / 2, y: 0 },
       }
-    default:
-      return {
-        in: [{ x: -GATE_W / 2, y: -12 }, { x: -GATE_W / 2, y: 12 }],
-        out: { x: GATE_W / 2, y: 0 },
+    default: {
+      // 2-input gates use the canonical pin spacing. 3+ inputs distribute
+      // pins evenly along the left edge so each wire terminates flush
+      // against the body without overlap.
+      if (inputCount <= 2) {
+        return {
+          in: [{ x: -GATE_W / 2, y: -12 }, { x: -GATE_W / 2, y: 12 }],
+          out: { x: GATE_W / 2, y: 0 },
+        }
       }
+      const span = 32                    // total vertical span for input pins
+      const pins = []
+      for (let i = 0; i < inputCount; i++) {
+        const t = inputCount === 1 ? 0.5 : i / (inputCount - 1)
+        pins.push({ x: -GATE_W / 2, y: -span / 2 + t * span })
+      }
+      return { in: pins, out: { x: GATE_W / 2, y: 0 } }
+    }
   }
 }
 
@@ -1172,7 +1540,7 @@ function renderComponent(comp, opts = {}) {
 
   switch (comp.kind) {
     case 'GATE': {
-      const pins = gatePinLayout(comp.gateType)
+      const pins = gatePinLayout(comp.gateType, (comp.inputs || []).length)
       return {
         glyph: <GateGlyph type={comp.gateType} color={color} />,
         pinList: {
@@ -1185,6 +1553,18 @@ function renderComponent(comp, opts = {}) {
         w: GATE_W, h: GATE_H,
         gateType: comp.gateType,
       }
+    }
+
+    case 'MOD_INSTANCE': {
+      // Multi-module instantiation rendered as a labelled functional block.
+      const block = FunctionalBlock({
+        title: comp.instanceLabel,
+        subtitle: comp.instanceSubtitle,
+        inputs: comp.inputs,
+        outputs: comp.outputs,
+        color,
+      })
+      return { glyph: block.body, pinList: block.pinList, w: block.w, h: block.h }
     }
 
     case 'MUX': {
@@ -1419,6 +1799,7 @@ export default function SchematicView({ design, hasErrors = false, onGateClick, 
       hoveredSignal={hoveredSignal}
       setHoveredSignal={setHoveredSignal}
       logicIssues={logicIssues}
+      multiValidation={parsed.validation || null}
     />
   )
 }
@@ -1525,11 +1906,35 @@ function FlatView({
   module: mod, components, signalOwners, hasErrors, design, onGateClick,
   hovered, setHovered, hoveredSignal, setHoveredSignal,
   logicIssues = [],
+  multiValidation = null,
 }) {
-  const compIssueMap = useMemo(
-    () => attachIssuesToComponents(components, logicIssues),
-    [components, logicIssues],
-  )
+  // Map upstream `logicIssues` (line-based) to components with the existing
+  // heuristic. Then merge in the multi-module validation results, which are
+  // already keyed by component index so no fuzzy matching is needed.
+  const compIssueMap = useMemo(() => {
+    const base = attachIssuesToComponents(components, logicIssues)
+    if (multiValidation?.perComponentIssues) {
+      for (const [idx, list] of multiValidation.perComponentIssues) {
+        if (!base.has(idx)) base.set(idx, [])
+        for (const it of list) {
+          // Synthesize a minimal logic-issue shape so the existing badge UI
+          // and tooltip code work without changes.
+          base.get(idx).push({
+            severity: it.severity,
+            message: it.message,
+            line: null,
+            code: 'multi_module',
+            snippet: '',
+          })
+        }
+      }
+    }
+    return base
+  }, [components, logicIssues, multiValidation])
+
+  // Wire colour overrides from validation: signals flagged "error" go red,
+  // "warning" go amber. Used in the wire path renderer below.
+  const signalSeverity = multiValidation?.perSignalSeverity || new Map()
 
   // Layout columns (per the spec):
   //   - Input dots at x=60, labels right-aligned ending at x=55
@@ -1771,20 +2176,36 @@ function FlatView({
           })}
 
           {/* Wires — rendered as rounded-corner SVG paths so 90° bends look
-              soft rather than sharp. */}
+              soft rather than sharp. Validation overrides: red for errors
+              (multi-driver, combinational loops), amber for warnings
+              (floating, width mismatch, unused output). */}
           {wires.map((w, i) => {
             const isHot = hoveredSignal && w.signal === hoveredSignal
-            const color = hasErrors ? ERR : (isHot ? HILITE : WIRE)
+            const sev = signalSeverity.get(w.signal)
+            let color
+            if (sev === 'error')        color = ERR
+            else if (sev === 'warning') color = 'var(--warning, #d29922)'
+            else if (hasErrors)         color = ERR
+            else if (isHot)             color = HILITE
+            else                        color = WIRE
+            const tooltip = sev === 'error'
+              ? `${w.signal} — error: see component badges`
+              : sev === 'warning'
+              ? `${w.signal} — warning: see component badges`
+              : null
             return (
               <path
                 key={`w-${i}`}
                 d={roundedPath(w.points, 3)}
-                stroke={color} strokeWidth={isHot ? 2 : 1.5} fill="none"
+                stroke={color} strokeWidth={isHot || sev ? 2 : 1.5} fill="none"
                 strokeLinecap="round" strokeLinejoin="round"
+                strokeDasharray={sev === 'warning' ? '4 3' : undefined}
                 onMouseEnter={() => setHoveredSignal(w.signal)}
                 onMouseLeave={() => setHoveredSignal(null)}
                 style={{ cursor: 'pointer', transition: 'stroke 0.12s' }}
-              />
+              >
+                {tooltip && <title>{tooltip}</title>}
+              </path>
             )
           })}
 

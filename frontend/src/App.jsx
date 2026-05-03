@@ -112,23 +112,54 @@ function TabBar({ tabs, active, onChange }) {
 /**
  * Parse module name and ports from Verilog code. Returns { name, portCount }.
  * Uses a lightweight regex — good enough for ANSI port-list style modules.
+ *
+ * Multi-module designs: when the source contains 2+ modules (the multi-symbol
+ * wrapper format the backend emits), the LAST module is the top-level wrapper
+ * and its name / port count is what the user actually cares about. We walk
+ * `module ... endmodule` blocks and prefer the last one whose body contains
+ * instantiations (`<type> <name>(.<port>(...))`), falling back to the literal
+ * last module if none match.
  */
 function parseDesignMeta(code) {
   if (!code) return { name: 'untitled', portCount: 0 }
-  const nameMatch = code.match(/module\s+(\w+)/)
-  const name = nameMatch ? nameMatch[1] : 'untitled'
 
-  let portCount = 0
-  const modMatch = code.match(/module\s+\w+\s*\(([\s\S]*?)\)\s*;/)
-  if (modMatch) {
-    const portText = modMatch[1]
-    for (const decl of portText.split(',')) {
-      if (decl.trim().match(/^(input|output|inout)\b/)) portCount++
-    }
+  // Collect every (name, portText, body) triple.
+  const blocks = []
+  const re = /module\s+(\w+)\s*\(([\s\S]*?)\)\s*;([\s\S]*?)\bendmodule\b/g
+  let m
+  while ((m = re.exec(code)) !== null) {
+    blocks.push({ name: m[1], portText: m[2], body: m[3] })
   }
-  // Fallback: count "input"/"output"/"inout" statements in the body
+
+  // Pick the wrapper: last block whose body has instantiations, else the
+  // first / only block (single-module or free-text design — unchanged).
+  let target = null
+  if (blocks.length >= 2) {
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      if (/\b\w+\s+\w+\s*\(\s*\.\s*\w+\s*\(/.test(blocks[i].body)) {
+        target = blocks[i]
+        break
+      }
+    }
+    if (!target) target = blocks[blocks.length - 1]
+  } else if (blocks.length === 1) {
+    target = blocks[0]
+  }
+
+  if (!target) {
+    // No `endmodule` paired up — fall back to the original lightweight scan
+    const nameMatch = code.match(/module\s+(\w+)/)
+    return { name: nameMatch ? nameMatch[1] : 'untitled', portCount: 0 }
+  }
+
+  const name = target.name
+  let portCount = 0
+  for (const decl of target.portText.split(',')) {
+    if (decl.trim().match(/^(input|output|inout)\b/)) portCount++
+  }
+  // Fallback: count "input"/"output"/"inout" declarations in the body
   if (portCount === 0) {
-    const bodyMatches = code.match(/^\s*(input|output|inout)\b/gm)
+    const bodyMatches = target.body.match(/^\s*(input|output|inout)\b/gm)
     if (bodyMatches) portCount = bodyMatches.length
   }
 
