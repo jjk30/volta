@@ -152,6 +152,7 @@ def _fix_verilog(verilog: str) -> str:
 
 def _fix_duplicate_parameters(verilog: str) -> str:
     """Remove duplicate parameter/localparam declarations."""
+    import re
     lines = verilog.split('\n')
     seen_params = set()
     result_lines = []
@@ -159,51 +160,48 @@ def _fix_duplicate_parameters(verilog: str) -> str:
     for line in lines:
         stripped = line.strip()
 
-        # Check for single parameter declaration: parameter NAME = VALUE;
-        single_match = re.match(r'^(parameter|localparam)\s+(\w+)\s*=', stripped)
-        if single_match:
-            name = single_match.group(2)
-            if name in seen_params:
-                # Skip this duplicate line entirely
-                continue
-            seen_params.add(name)
+        # Skip empty lines and non-parameter lines
+        if not stripped.startswith(('parameter', 'localparam')):
             result_lines.append(line)
             continue
 
-        # Check for parameter with bit range: parameter [N:0] NAME = VALUE;
-        range_match = re.match(r'^(parameter|localparam)\s+\[.*?\]\s+(\w+)\s*=', stripped)
-        if range_match:
-            name = range_match.group(2)
-            if name in seen_params:
-                continue
-            seen_params.add(name)
+        # Handle comma-separated: parameter A = 0, B = 1, C = 2;
+        param_body = re.sub(r'^(parameter|localparam)\s+(\[\d+:\d+\]\s+)?', '', stripped)
+        parts = param_body.split(',')
+
+        names_in_line = []
+        for part in parts:
+            part = part.strip().rstrip(';')
+            name_match = re.match(r'(\w+)\s*=', part)
+            if name_match:
+                names_in_line.append(name_match.group(1))
+
+        if not names_in_line:
             result_lines.append(line)
             continue
+
+        # Check if ALL names in this line are duplicates
+        all_dupes = all(n in seen_params for n in names_in_line)
+
+        if all_dupes:
+            # Every name is a duplicate - remove entire line
+            continue
+
+        # Add all new names to seen set
+        for n in names_in_line:
+            seen_params.add(n)
 
         result_lines.append(line)
 
-    fixed = '\n'.join(result_lines)
-    if fixed != verilog:
-        print(f"[POST-PROCESS] _fix_duplicate_parameters: removed {len(verilog.split(chr(10))) - len(result_lines)} duplicate lines")
-    return fixed
+    return '\n'.join(result_lines)
 
 
 def _fix_array_assignment(verilog: str) -> str:
-    """Replace whole-array assignments like ``mem <= 0;`` with for-loops.
+    """Replace whole-array assignments like 'mem <= 0;' with for-loops."""
+    import re
 
-    Conservative — fires ONLY when:
-      1. The LHS is the bare name of a declared unpacked array
-         (``reg [W:0] name [hi:lo];`` somewhere in the module).
-      2. The matched line is anchored with ``(\\n\\s+)`` so we never
-         swallow context from the previous line and never trigger on
-         ``mem[i] <= 0;`` (indexed) or on plain regs.
-    """
-    # Step 1: Find memory array declarations.
-    # Match: reg [7:0] mem [0:7]; OR reg [7:0] mem [7:0]; (either direction)
-    array_decls = re.findall(
-        r'reg\s+\[(\d+):0\]\s+(\w+)\s+\[(\d+):(\d+)\]',
-        verilog,
-    )
+    # Find memory array declarations: reg [W:0] name [0:D] or reg [W:0] name [D:0]
+    array_decls = re.findall(r'reg\s+\[(\d+):0\]\s+(\w+)\s+\[(\d+):(\d+)\]', verilog)
 
     if not array_decls:
         return verilog
@@ -212,146 +210,83 @@ def _fix_array_assignment(verilog: str) -> str:
     for match in array_decls:
         width = int(match[0]) + 1
         name = match[1]
-        idx_high = int(match[2])
-        idx_low = int(match[3])
-        depth = abs(idx_high - idx_low) + 1
+        idx_a = int(match[2])
+        idx_b = int(match[3])
+        depth = abs(idx_a - idx_b) + 1
         arrays[name] = (width, depth)
 
-    # Step 2: For each declared array, look for whole-array assignment.
-    # The (\n\s+) anchor guarantees the match starts at the beginning of a
-    # line (preceded by a newline and some indentation) — that prevents
-    # accidentally rewriting `mem[i] <= 0;` or matching mid-statement.
     for arr_name, (width, depth) in arrays.items():
-        patterns = [
-            (re.compile(r'(\n\s+)' + re.escape(arr_name) + r'\s*<=\s*0\s*;'), '<='),
-            (re.compile(r'(\n\s+)' + re.escape(arr_name) + r"\s*<=\s*'\{default\s*:\s*'?0\}\s*;"), '<='),
-            (re.compile(r'(\n\s+)' + re.escape(arr_name) + r'\s*=\s*0\s*;'), '='),
-        ]
+        # Match: "    mem <= 0;" or "    mem <= '{default:0};"
+        pattern = re.compile(
+            r'(\n)([ \t]+)' + re.escape(arr_name) + r"\s*<=\s*(?:0|'?\{default\s*:\s*'?0\})\s*;"
+        )
 
-        for pat, op in patterns:
-            match = pat.search(verilog)
-            if match:
-                indent = match.group(1)  # includes the leading newline
-                replacement = (
-                    f"{indent}begin : volta_rst_{arr_name}"
-                    f"{indent}  integer volta_i;"
-                    f"{indent}  for (volta_i = 0; volta_i < {depth}; volta_i = volta_i + 1)"
-                    f"{indent}    {arr_name}[volta_i] {op} {width}'b0;"
-                    f"{indent}end"
-                )
-                verilog = pat.sub(replacement, verilog, count=1)
-                print(
-                    f"[POST-PROCESS] _fix_array_assignment: replaced "
-                    f"'{arr_name} {op} 0' with for-loop "
-                    f"(depth={depth}, width={width})"
-                )
-                break  # Only fix once per array
+        match = pattern.search(verilog)
+        if match:
+            nl = match.group(1)
+            indent = match.group(2)
+            replacement = (
+                f"{nl}{indent}begin : volta_rst_{arr_name}\n"
+                f"{indent}  integer volta_i;\n"
+                f"{indent}  for (volta_i = 0; volta_i < {depth}; volta_i = volta_i + 1)\n"
+                f"{indent}    {arr_name}[volta_i] <= {width}'b0;\n"
+                f"{indent}end"
+            )
+            verilog = verilog[:match.start()] + replacement + verilog[match.end():]
 
     return verilog
 
 
 def _fix_parameters_before_ports(verilog: str) -> str:
-    """Move parameter/localparam declarations that appear BETWEEN the
-    `module NAME` line and the port-list to AFTER the closing `);`.
-
-    The LLM sometimes generates code like::
-
-        module sequence_detector
-          parameter IDLE = 2'b00;
-          parameter S1 = 2'b01;
-          input wire clk,
-          input wire din,
-          output reg detected
-        );
-
-    iverilog explodes with "unexpected TOK_INPUT" because parameters
-    can't sit between the module name and the port list. This fix walks
-    line-by-line to detect the pattern, then:
-
-      1. Inserts an opening `(` after `module NAME` if the module line
-         doesn't already have one.
-      2. Keeps the port declaration block intact (including the closing
-         `);` line).
-      3. Re-emits the stray parameter lines immediately AFTER the
-         closing `);`.
-
-    Modules that already place parameters correctly (after the port
-    list) are left alone.
-    """
-
+    """Move parameter declarations that appear before port declarations in module header."""
+    import re
     lines = verilog.split('\n')
 
-    # 1. Find the `module NAME` line.
-    mod_idx = None
-    mod_name = None
+    module_idx = -1
+    first_port_idx = -1
+    port_close_idx = -1
+
     for i, line in enumerate(lines):
-        m = re.match(r'^\s*module\s+(\w+)\b', line)
-        if m:
-            mod_idx = i
-            mod_name = m.group(1)
+        stripped = line.strip()
+        if stripped.startswith('module ') and module_idx == -1:
+            module_idx = i
+        elif module_idx >= 0 and first_port_idx == -1:
+            if re.match(r'\s*(input|output|inout)\s', stripped):
+                first_port_idx = i
+        if module_idx >= 0 and stripped.endswith(');'):
+            port_close_idx = i
             break
-    if mod_idx is None:
+
+    if module_idx == -1 or first_port_idx == -1:
         return verilog
 
-    mod_line = lines[mod_idx]
-    has_open_paren_in_header = '(' in mod_line
+    params_to_move = []
+    lines_to_remove = []
 
-    # 2. Walk forward looking for stray parameters BEFORE any port
-    # declaration. Stop at the first line that's neither blank, comment,
-    # parameter, nor `(` opener.
-    stray_param_indices = []
-    first_port_idx = None
-    j = mod_idx + 1
-    while j < len(lines):
-        stripped = lines[j].strip()
-        if stripped == '' or stripped.startswith('//'):
-            j += 1
-            continue
-        # An `(` line opens the port list — keep it in place.
-        if (not has_open_paren_in_header
-                and '(' in stripped
-                and not stripped.startswith('parameter')
-                and not stripped.startswith('localparam')):
-            has_open_paren_in_header = True
-            j += 1
-            continue
-        if re.match(r'(parameter|localparam)\s+', stripped):
-            stray_param_indices.append(j)
-            j += 1
-            continue
-        if re.match(r'(input|output|inout)\b', stripped):
-            first_port_idx = j
+    for i in range(module_idx + 1, first_port_idx):
+        stripped = lines[i].strip()
+        if stripped.startswith(('parameter', 'localparam')):
+            params_to_move.append(lines[i])
+            lines_to_remove.append(i)
+
+    if not params_to_move:
+        return verilog
+
+    new_lines = [l for i, l in enumerate(lines) if i not in lines_to_remove]
+
+    # Find new position of ");" and insert parameters after it
+    for i, line in enumerate(new_lines):
+        if line.strip().endswith(');') and i >= module_idx:
+            for j, param in enumerate(params_to_move):
+                new_lines.insert(i + 1 + j, param)
             break
-        # Any other content — this isn't the malformed pattern.
-        return verilog
 
-    if not stray_param_indices or first_port_idx is None:
-        return verilog
-
-    # 3. Find the closing `);` of the port list.
-    close_idx = None
-    for k in range(first_port_idx, len(lines)):
-        if ');' in lines[k]:
-            close_idx = k
+    # Ensure module line has opening paren
+    for i, line in enumerate(new_lines):
+        if line.strip().startswith('module ') and '(' not in line:
+            new_lines[i] = line.rstrip() + ' ('
             break
-    if close_idx is None:
-        return verilog
 
-    # 4. Rebuild:
-    #    pre-module → `module NAME (` → port lines → `);` → moved params →
-    #    rest-of-body
-    new_lines: list[str] = []
-    new_lines.extend(lines[:mod_idx])
-    if has_open_paren_in_header:
-        new_lines.append(mod_line)
-    else:
-        new_lines.append(f"module {mod_name} (")
-    new_lines.extend(lines[first_port_idx:close_idx + 1])
-    for k in stray_param_indices:
-        new_lines.append(lines[k])
-    new_lines.extend(lines[close_idx + 1:])
-
-    print(f"[POST-PROCESS] _fix_parameters_before_ports: moved {len(stray_param_indices)} parameter line(s) below port list")
     return '\n'.join(new_lines)
 
 
