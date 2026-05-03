@@ -260,6 +260,305 @@ async def simulate(req: SimulateRequest):
 
 class GenerateRequest(BaseModel):
     prompt: str
+    # When `multi_module` is True the backend generates one Verilog module per
+    # entry in `symbols` and stitches them together with a top-level wrapper.
+    # Both fields default to off so all existing single-prompt callers keep
+    # the unchanged behaviour.
+    multi_module: bool = False
+    symbols: list[str] = []
+
+
+# ---------------------------------------------------------------------------
+# Multi-module helpers — symbol → prompt mapping, port parsing, wrapper builder
+# ---------------------------------------------------------------------------
+
+# Canonical-name → orchestrator prompt. Names match the SYMBOL_ID_TO_CANONICAL
+# table on the frontend (which uppercases the symbol-library ids).
+SYMBOL_PROMPT_MAP: dict[str, str] = {
+    "AND":         "Design a 2-input AND gate",
+    "OR":          "Design a 2-input OR gate",
+    "NOT":         "Design a NOT gate (inverter)",
+    "NAND":        "Design a 2-input NAND gate",
+    "NOR":         "Design a 2-input NOR gate",
+    "XOR":         "Design a 2-input XOR gate",
+    "XNOR":        "Design a 2-input XNOR gate",
+    "AND3":        "Design a 3-input AND gate",
+    "OR3":         "Design a 3-input OR gate",
+    "NAND3":       "Design a 3-input NAND gate",
+    "NOR3":        "Design a 3-input NOR gate",
+    "XOR3":        "Design a 3-input XOR gate",
+    "AND4":        "Design a 4-input AND gate",
+    "OR4":         "Design a 4-input OR gate",
+    "NAND4":       "Design a 4-input NAND gate",
+    "NOR4":        "Design a 4-input NOR gate",
+    "BUFFER":      "Design a buffer (output equals input)",
+    "TRISTATE":    "Design a tri-state buffer with enable",
+    "MUX2":        "Design a 2-to-1 multiplexer",
+    "MUX4":        "Design a 4-to-1 multiplexer",
+    "MUX8":        "Design a 8-to-1 multiplexer",
+    "DEMUX2":      "Design a 1-to-2 demultiplexer",
+    "DEMUX4":      "Design a 1-to-4 demultiplexer",
+    "ALU":         "Design a 4-bit ALU with add, subtract, AND, OR operations",
+    "FULL_ADDER":  "Design a full adder",
+    "HALF_ADDER":  "Design a half adder",
+    "COMPARATOR":  "Design a 4-bit comparator with greater than, equal, less than outputs",
+    "DFF":         "Design a D flip-flop with reset",
+    "JKFF":        "Design a JK flip-flop with reset",
+    "TFF":         "Design a T flip-flop with reset",
+    "SRFF":        "Design an SR flip-flop",
+    "REG":         "Design an 8-bit register with enable and reset",
+    "RAM":         "Design a 16x8 RAM with read and write ports",
+    "ROM":         "Design a 16x8 ROM",
+    "REGFILE":     "Design an 8x8 register file",
+    "COUNTER":     "Design a 4-bit counter with reset and enable",
+    "SHIFT_REG":   "Design an 8-bit shift register",
+    "DECODER":     "Design a 2-to-4 decoder",
+    "ENCODER":     "Design a 4-to-2 priority encoder",
+    "PC":          "Design a program counter with reset",
+    "CTRL":        "Design a CPU control unit driven by an opcode",
+    "IMEM":        "Design a 64x32 instruction memory (read-only)",
+    "DMEM":        "Design a 64x32 data memory with read and write",
+    "SEXT":        "Design a 16-to-32 sign-extender",
+    "CLKGEN":      "Design a clock generator producing a divided clock",
+}
+
+
+def _symbol_to_prompt(name: str) -> str:
+    """Resolve a symbol name to an orchestrator prompt, falling back to a
+    generic 'Design a <name>' if the name isn't in the canonical map."""
+    key = name.strip().upper().replace(" ", "_").replace("-", "_")
+    if key in SYMBOL_PROMPT_MAP:
+        return SYMBOL_PROMPT_MAP[key]
+    pretty = name.replace("_", " ").lower()
+    return f"Design a {pretty}"
+
+
+def _parse_module_ports(verilog: str) -> dict:
+    """Pull the module name and its ANSI-style port list out of generated
+    Verilog. Returns {name, inputs, outputs} where inputs/outputs are lists
+    of {name, width_bits, width_str}.
+
+    Conservative: only parses ANSI-style headers like
+        module foo (
+          input wire [W:0] a,
+          ...
+        );
+    which the orchestrator's pipeline produces. Non-ANSI bodies are not
+    inspected (the wrapper falls back to whatever names appear in the
+    instantiation).
+    """
+    info: dict = {"name": "", "inputs": [], "outputs": []}
+    hdr = re.search(r"\bmodule\s+(\w+)\s*\(([\s\S]*?)\)\s*;", verilog)
+    if not hdr:
+        return info
+    info["name"] = hdr.group(1)
+    port_text = hdr.group(2)
+    # Split the port list on top-level commas and parse each entry
+    parts = [p.strip() for p in port_text.split(",") if p.strip()]
+    for part in parts:
+        m = re.match(
+            r"(input|output|inout)\s+(?:reg\s+|wire\s+|logic\s+)?"
+            r"(?:signed\s+)?(?:\[([^\]]+)\]\s+)?(\w+)\s*$",
+            part,
+        )
+        if not m:
+            continue
+        direction = m.group(1)
+        width_str = m.group(2)
+        port_name = m.group(3)
+        # Compute width in bits if possible (e.g. "[3:0]" → 4); leave
+        # parametric expressions as their raw text so we can preserve them
+        # in the wrapper without trying to evaluate.
+        width_bits = 1
+        if width_str:
+            wm = re.match(r"\s*(\d+)\s*:\s*(\d+)\s*$", width_str)
+            if wm:
+                width_bits = abs(int(wm.group(1)) - int(wm.group(2))) + 1
+            else:
+                width_bits = -1   # symbolic — track but don't rely on it
+        entry = {"name": port_name, "width_bits": width_bits,
+                 "width_str": width_str or ""}
+        if direction == "input":
+            info["inputs"].append(entry)
+        elif direction in ("output", "inout"):
+            info["outputs"].append(entry)
+    return info
+
+
+def _create_wrapper_module(modules_info: list[dict]) -> tuple[str, str]:
+    """Build a top-level wrapper that instantiates every sub-module + a
+    matching testbench. Returns ``(wrapper_verilog, testbench_verilog)``.
+
+    Inputs are SHARED across sub-modules when their name and bit-width
+    match (the typical case for a/b/cin/sel/clk/rst/en across logic
+    gates). When widths differ — or when the same name appears across
+    sub-modules with incompatible widths — the input is renamed with a
+    ``<module>_`` prefix to keep both signals distinct on the wrapper.
+    Output ports are always prefixed (``<module>_<port>``) since two
+    sub-modules can each emit their own ``y``.
+
+    ``modules_info`` is a list of dicts with at least ``name``, ``inputs``,
+    ``outputs`` (each port is ``{name, width_bits, width_str}``).
+    """
+
+    SHAREABLE_NAMES = {"a", "b", "cin", "sel", "clk", "rst", "reset",
+                       "en", "enable", "din", "we"}
+
+    # Decide which inputs become shared wrapper-level inputs and which
+    # need module-prefixed names. shared_widths[name] = (width_bits,
+    # width_str) when at least two sub-modules agree on name+width.
+    name_widths: dict[str, list[tuple[int, str]]] = {}
+    for m in modules_info:
+        for p in m.get("inputs", []):
+            name_widths.setdefault(p["name"], []).append(
+                (p["width_bits"], p["width_str"])
+            )
+
+    shared_inputs: dict[str, tuple[int, str]] = {}
+    for name, widths in name_widths.items():
+        if name not in SHAREABLE_NAMES:
+            continue
+        first = widths[0]
+        if all(w == first for w in widths):
+            shared_inputs[name] = first
+
+    # Assemble the wrapper port list:
+    wrapper_inputs: list[tuple[str, str]] = []   # (name, width_str)
+    seen_wrapper_inputs: set[str] = set()
+
+    # First, all the shared inputs (preserve declaration order from the
+    # first sub-module that declared each name)
+    for m in modules_info:
+        for p in m.get("inputs", []):
+            if p["name"] in shared_inputs and p["name"] not in seen_wrapper_inputs:
+                wrapper_inputs.append((p["name"], p["width_str"]))
+                seen_wrapper_inputs.add(p["name"])
+
+    # Then non-shareable / width-mismatched inputs, prefixed with module name
+    # to disambiguate
+    instance_input_renames: dict[tuple[str, str], str] = {}   # (mod_name, port) → wrapper port name
+    for m in modules_info:
+        mod_name = m["name"]
+        for p in m.get("inputs", []):
+            if p["name"] in shared_inputs:
+                instance_input_renames[(mod_name, p["name"])] = p["name"]
+                continue
+            wrapper_port = f"{mod_name}_{p['name']}"
+            if wrapper_port in seen_wrapper_inputs:
+                continue
+            wrapper_inputs.append((wrapper_port, p["width_str"]))
+            seen_wrapper_inputs.add(wrapper_port)
+            instance_input_renames[(mod_name, p["name"])] = wrapper_port
+
+    # All outputs are prefixed (sub-modules can each have their own `y`)
+    wrapper_outputs: list[tuple[str, str]] = []
+    instance_output_renames: dict[tuple[str, str], str] = {}
+    for m in modules_info:
+        mod_name = m["name"]
+        for p in m.get("outputs", []):
+            wrapper_port = f"{mod_name}_{p['name']}"
+            wrapper_outputs.append((wrapper_port, p["width_str"]))
+            instance_output_renames[(mod_name, p["name"])] = wrapper_port
+
+    def _decl(direction: str, port_list: list[tuple[str, str]]) -> list[str]:
+        out = []
+        for nm, wstr in port_list:
+            w = f"[{wstr}] " if wstr else ""
+            kw = "wire" if direction == "input" else "wire"
+            out.append(f"  {direction} {kw} {w}{nm}")
+        return out
+
+    port_decl_lines = (
+        _decl("input", wrapper_inputs) + _decl("output", wrapper_outputs)
+    )
+
+    wrapper_lines: list[str] = []
+    wrapper_lines.append("module digital_logic_circuit (")
+    wrapper_lines.append(",\n".join(port_decl_lines))
+    wrapper_lines.append(");")
+    wrapper_lines.append("")
+
+    for m in modules_info:
+        mod_name = m["name"]
+        connections: list[str] = []
+        for p in m.get("inputs", []):
+            wrapper_port = instance_input_renames.get((mod_name, p["name"]), p["name"])
+            connections.append(f".{p['name']}({wrapper_port})")
+        for p in m.get("outputs", []):
+            wrapper_port = instance_output_renames.get((mod_name, p["name"]), p["name"])
+            connections.append(f".{p['name']}({wrapper_port})")
+        wrapper_lines.append(
+            f"  {mod_name} u_{mod_name} ({', '.join(connections)});"
+        )
+
+    wrapper_lines.append("")
+    wrapper_lines.append("endmodule")
+    wrapper_verilog = "\n".join(wrapper_lines)
+
+    # ---- Testbench for the wrapper -----------------------------------------
+    has_clk = any(name == "clk" for name, _ in wrapper_inputs)
+    has_rst = any(name in ("rst", "reset") for name, _ in wrapper_inputs)
+
+    tb_lines: list[str] = []
+    tb_lines.append("module tb_digital_logic_circuit;")
+    for nm, wstr in wrapper_inputs:
+        w = f"[{wstr}] " if wstr else ""
+        tb_lines.append(f"  reg {w}{nm};")
+    for nm, wstr in wrapper_outputs:
+        w = f"[{wstr}] " if wstr else ""
+        tb_lines.append(f"  wire {w}{nm};")
+    tb_lines.append("")
+
+    pc = ", ".join(
+        f".{nm}({nm})" for nm, _ in (wrapper_inputs + wrapper_outputs)
+    )
+    tb_lines.append(f"  digital_logic_circuit uut({pc});")
+    tb_lines.append("")
+
+    if has_clk:
+        tb_lines.append("  initial clk = 0;")
+        tb_lines.append("  always #5 clk = ~clk;")
+        tb_lines.append("")
+
+    tb_lines.append("  initial begin")
+    tb_lines.append('    $dumpfile("dump.vcd");')
+    tb_lines.append("    $dumpvars(0, tb_digital_logic_circuit);")
+    tb_lines.append("")
+    # Initialize all inputs
+    for nm, _ in wrapper_inputs:
+        tb_lines.append(f"    {nm} = 0;")
+    tb_lines.append("")
+
+    rst_name = next((nm for nm, _ in wrapper_inputs if nm in ("rst", "reset")), None)
+    if rst_name:
+        tb_lines.append(f"    {rst_name} = 1; #20; {rst_name} = 0; #10;")
+        tb_lines.append("")
+
+    # Drive a few input combinations: all-zero, half/half, all-one,
+    # alternating bits. Each pattern sets every non-clk/rst input to the
+    # same fill value and waits for outputs to settle, then prints them.
+    data_inputs = [(nm, wstr) for nm, wstr in wrapper_inputs
+                   if nm != "clk" and nm not in ("rst", "reset")]
+
+    fill_patterns = [(0, "all-zero"), (1, "single-bit"),
+                     (0xAA, "alternating"), (0xFFFF, "all-one")]
+    for value, label in fill_patterns:
+        tb_lines.append(f"    // Pattern: {label}")
+        for nm, _ in data_inputs:
+            tb_lines.append(f"    {nm} = {value};")
+        tb_lines.append("    #10;")
+        for nm, _ in wrapper_outputs:
+            tb_lines.append(
+                f'    $display("[{label}] {nm} = %0d", {nm});'
+            )
+        tb_lines.append("")
+
+    tb_lines.append("    #10;")
+    tb_lines.append("    $finish;")
+    tb_lines.append("  end")
+    tb_lines.append("endmodule")
+
+    return wrapper_verilog, "\n".join(tb_lines)
 
 
 class CorrectionInfo(BaseModel):
@@ -299,6 +598,73 @@ async def generate(req: GenerateRequest):
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is empty")
 
+    # ----- Multi-module path: one orchestrator run per selected symbol ---
+    if req.multi_module and len(req.symbols) >= 2:
+        sub_designs: list[str] = []
+        modules_info: list[dict] = []
+        agg_attempts = 0
+        agg_passed = True
+        agg_errors_fixed: list[str] = []
+        agg_issues: list[dict] = []
+
+        for sym in req.symbols:
+            sub_prompt = _symbol_to_prompt(sym)
+            logger.info("Multi-module: generating %r → %r", sym, sub_prompt)
+            try:
+                sub_result = orchestrator_generate(sub_prompt)
+            except RuntimeError as e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Generation failed for {sym!r}: {e}. Is Ollama running?",
+                )
+            except Exception as e:
+                logger.exception("Unexpected error generating %r", sym)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Generation failed for {sym!r}: {e}",
+                )
+
+            sub_design = sub_result.get("design", "")
+            ports = _parse_module_ports(sub_design)
+            if ports.get("name"):
+                modules_info.append({
+                    "name": ports["name"],
+                    "inputs": ports["inputs"],
+                    "outputs": ports["outputs"],
+                })
+                sub_designs.append(sub_design)
+
+            corr = sub_result.get("correction") or {}
+            agg_attempts += corr.get("attempts", 0)
+            agg_passed = agg_passed and corr.get("passed", False)
+            agg_errors_fixed.extend(corr.get("errors_fixed", []) or [])
+            agg_issues.extend(sub_result.get("logic_issues") or [])
+
+        if not modules_info:
+            raise HTTPException(
+                status_code=502,
+                detail="Multi-module generation produced no parseable modules.",
+            )
+
+        wrapper, tb = _create_wrapper_module(modules_info)
+        combined_design = "\n\n".join(sub_designs + [wrapper])
+
+        correction = CorrectionInfo(
+            ran=True,
+            passed=agg_passed,
+            attempts=agg_attempts,
+            errors_fixed=agg_errors_fixed[:50],   # cap to keep response small
+        )
+        issues = [LogicIssue(**it) for it in agg_issues]
+
+        return GenerateResponse(
+            design=combined_design,
+            testbench=tb,
+            correction=correction,
+            logic_issues=issues,
+        )
+
+    # ----- Single-prompt path (unchanged) -------------------------------
     try:
         result = orchestrator_generate(req.prompt)
     except RuntimeError as e:

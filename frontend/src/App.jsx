@@ -13,6 +13,23 @@ import { DEFAULT_DESIGN, DEFAULT_TESTBENCH } from './defaults.js'
 
 const API_URL = 'http://localhost:8000'
 
+// Map symbol-library ids (lowercase, e.g. "fulladd") to the canonical
+// uppercase names the backend's SYMBOL_PROMPT_MAP knows (e.g. "FULL_ADDER").
+// Anything not in this map falls back to the symbol's display name uppercased,
+// which the backend then either matches loosely or treats as a free-text prompt.
+const SYMBOL_ID_TO_CANONICAL = {
+  and: 'AND', or: 'OR', not: 'NOT', nand: 'NAND', nor: 'NOR',
+  xor: 'XOR', xnor: 'XNOR', buffer: 'BUFFER', tristate: 'TRISTATE',
+  mux2: 'MUX2', mux4: 'MUX4', mux8: 'MUX8',
+  demux2: 'DEMUX2', demux4: 'DEMUX4',
+  alu: 'ALU', fulladd: 'FULL_ADDER', halfadd: 'HALF_ADDER',
+  cmp: 'COMPARATOR', shifter: 'SHIFT_REG',
+  dff: 'DFF', jkff: 'JKFF', tff: 'TFF', srlatch: 'SRFF',
+  reg: 'REG', ram: 'RAM', rom: 'ROM', regfile: 'REGFILE',
+  pc: 'PC', ctrl: 'CTRL', imem: 'IMEM', dmem: 'DMEM', sext: 'SEXT',
+  clkgen: 'CLKGEN', dec24: 'DECODER', prienc: 'ENCODER',
+}
+
 const EXAMPLES = [
   'Design a 4-bit ALU with add, sub, and, or',
   'Design a 4-bit counter with reset and enable',
@@ -237,11 +254,25 @@ function App() {
     setError(null)
     setSimResult(null)
     setCancelled(null)
+
+    // When 2+ symbols are selected from the library, ask the backend to
+    // generate one sub-module per symbol and stitch them together with a
+    // top-level wrapper. Single-symbol or free-text prompts use the
+    // existing single-module path unchanged.
+    const useMultiModule = selectedSymbols.length >= 2
+    const symbolNames = useMultiModule
+      ? selectedSymbols.map(s => SYMBOL_ID_TO_CANONICAL[s.id] || s.name.toUpperCase())
+      : []
+
     try {
       const resp = await fetch(`${API_URL}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          prompt,
+          multi_module: useMultiModule,
+          symbols: symbolNames,
+        }),
         signal: controller.signal,
       })
       if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`) }
@@ -258,7 +289,7 @@ function App() {
       if (e.name === 'AbortError') { setCancelled('generate'); setTimeout(() => setCancelled(null), 2000) }
       else setError(e.message)
     } finally { setGenerating(false); generateControllerRef.current = null }
-  }, [])
+  }, [selectedSymbols])
 
   const handleCancelGenerate = useCallback(() => { generateControllerRef.current?.abort() }, [])
 
