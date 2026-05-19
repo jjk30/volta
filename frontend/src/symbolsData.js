@@ -19,6 +19,7 @@ export const CATEGORIES = [
   'Flip-Flops',
   'Memory',
   'CPU Components',
+  'GPU Components',
   'Decoders',
 ]
 
@@ -530,6 +531,212 @@ export const SYMBOLS = {
         ${lbl(112, 52, 'clk', c)}
       </svg>`,
       verilog: `always #5 clk = ~clk;`,
+    },
+  ],
+
+  'GPU Components': [
+    {
+      name: 'SIMD ALU',
+      id: 'simd_alu_4lane',
+      promptText: 'Design a 4-lane SIMD ALU with add, subtract, AND, OR operations on 8-bit data',
+      svg: (c) => `<svg viewBox="0 0 140 100" xmlns="http://www.w3.org/2000/svg">
+        <rect x="20" y="15" width="90" height="75" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
+        <rect x="30" y="22" width="70" height="12" rx="2" stroke="${c}" stroke-width="1" fill="none"/>
+        <rect x="30" y="37" width="70" height="12" rx="2" stroke="${c}" stroke-width="1" fill="none"/>
+        <rect x="30" y="52" width="70" height="12" rx="2" stroke="${c}" stroke-width="1" fill="none"/>
+        <rect x="30" y="67" width="70" height="12" rx="2" stroke="${c}" stroke-width="1" fill="none"/>
+        ${lbl(65, 31, 'ALU0', c, 'middle', '7')}
+        ${lbl(65, 46, 'ALU1', c, 'middle', '7')}
+        ${lbl(65, 61, 'ALU2', c, 'middle', '7')}
+        ${lbl(65, 76, 'ALU3', c, 'middle', '7')}
+        <line x1="5" y1="28" x2="20" y2="28" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="43" x2="20" y2="43" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="58" x2="20" y2="58" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="73" x2="20" y2="73" stroke="${c}" stroke-width="1"/>
+        <line x1="110" y1="28" x2="125" y2="28" stroke="${c}" stroke-width="1"/>
+        <line x1="110" y1="43" x2="125" y2="43" stroke="${c}" stroke-width="1"/>
+        <line x1="110" y1="58" x2="125" y2="58" stroke="${c}" stroke-width="1"/>
+        <line x1="110" y1="73" x2="125" y2="73" stroke="${c}" stroke-width="1"/>
+        <line x1="65" y1="5" x2="65" y2="15" stroke="${c}" stroke-width="1.2"/>
+        ${lbl(63, 4, 'op', c, 'middle', '7')}
+        ${lbl(2, 26, 'a/b', c, 'start', '7')}
+        ${lbl(127, 30, 'y', c, 'start', '7')}
+      </svg>`,
+      verilog: `genvar i;\ngenerate for (i=0; i<4; i=i+1) begin: lane\n  always @(*) case (op)\n    2'b00: y[i] = a[i] + b[i];\n    2'b01: y[i] = a[i] - b[i];\n    2'b10: y[i] = a[i] & b[i];\n    2'b11: y[i] = a[i] | b[i];\n  endcase\nend endgenerate`,
+      truthTable: null,
+    },
+    {
+      name: 'MAC Array',
+      id: 'mac_array_4x4',
+      promptText: 'Design a 4x4 systolic MAC array for matrix multiplication (basis of tensor cores)',
+      svg: (c) => {
+        const cells = []
+        for (let r = 0; r < 4; r++) {
+          for (let col = 0; col < 4; col++) {
+            const x = 25 + col * 18
+            const y = 22 + r * 14
+            cells.push(`<rect x="${x}" y="${y}" width="14" height="10" rx="1.5" stroke="${c}" stroke-width="1" fill="none"/>`)
+            cells.push(`<line x1="${x + 14}" y1="${y + 5}" x2="${x + 18}" y2="${y + 5}" stroke="${c}" stroke-width="0.8" stroke-dasharray="2,1.5"/>`)
+            cells.push(`<line x1="${x + 7}" y1="${y + 10}" x2="${x + 7}" y2="${y + 14}" stroke="${c}" stroke-width="0.8" stroke-dasharray="2,1.5"/>`)
+          }
+        }
+        return `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+          <rect x="18" y="15" width="86" height="72" rx="3" stroke="${c}" stroke-width="1.6" fill="none"/>
+          ${cells.join('')}
+          ${lbl(60, 95, 'MAC ARRAY', c, 'middle', '8')}
+          <line x1="5" y1="25" x2="18" y2="25" stroke="${c}" stroke-width="1"/>
+          <line x1="5" y1="50" x2="18" y2="50" stroke="${c}" stroke-width="1"/>
+          <line x1="60" y1="5" x2="60" y2="15" stroke="${c}" stroke-width="1"/>
+          ${lbl(2, 24, 'A', c, 'start', '7')}
+          ${lbl(2, 49, 'B', c, 'start', '7')}
+        </svg>`
+      },
+      verilog: `genvar r, k;\ngenerate for (r=0; r<4; r=r+1) begin: row\n  for (k=0; k<4; k=k+1) begin: col\n    always @(posedge clk)\n      if (rst) acc[r][k] <= 0;\n      else     acc[r][k] <= acc[r][k] + a[r] * b[k];\n  end\nend endgenerate`,
+      truthTable: null,
+    },
+    {
+      name: 'Crossbar Switch',
+      id: 'crossbar_4x4',
+      promptText: 'Design a 4x4 crossbar switch routing any input to any output',
+      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+        <rect x="30" y="15" width="60" height="70" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
+        <line x1="30" y1="25" x2="90" y2="75" stroke="${c}" stroke-width="0.9"/>
+        <line x1="30" y1="40" x2="90" y2="60" stroke="${c}" stroke-width="0.9"/>
+        <line x1="30" y1="55" x2="90" y2="45" stroke="${c}" stroke-width="0.9"/>
+        <line x1="30" y1="70" x2="90" y2="30" stroke="${c}" stroke-width="0.9"/>
+        <line x1="30" y1="25" x2="90" y2="25" stroke="${c}" stroke-width="0.9"/>
+        <line x1="30" y1="75" x2="90" y2="75" stroke="${c}" stroke-width="0.9"/>
+        ${lbl(60, 95, '4x4 XBAR', c, 'middle', '8')}
+        <line x1="5" y1="25" x2="30" y2="25" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="40" x2="30" y2="40" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="55" x2="30" y2="55" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="70" x2="30" y2="70" stroke="${c}" stroke-width="1"/>
+        <line x1="90" y1="25" x2="115" y2="25" stroke="${c}" stroke-width="1"/>
+        <line x1="90" y1="40" x2="115" y2="40" stroke="${c}" stroke-width="1"/>
+        <line x1="90" y1="55" x2="115" y2="55" stroke="${c}" stroke-width="1"/>
+        <line x1="90" y1="70" x2="115" y2="70" stroke="${c}" stroke-width="1"/>
+        ${lbl(2, 24, 'in0', c, 'start', '7')}
+        ${lbl(117, 27, 'o0', c, 'start', '7')}
+      </svg>`,
+      verilog: `always @(*) begin\n  out0 = in[sel0];\n  out1 = in[sel1];\n  out2 = in[sel2];\n  out3 = in[sel3];\nend`,
+      truthTable: null,
+    },
+    {
+      name: 'Pipeline Reg',
+      id: 'pipeline_register',
+      promptText: 'Design a pipeline register stage with enable',
+      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+        <rect x="50" y="12" width="20" height="76" rx="2" stroke="${c}" stroke-width="1.8" fill="none"/>
+        <line x1="10" y1="25" x2="50" y2="25" stroke="${c}" stroke-width="1"/>
+        <line x1="10" y1="40" x2="50" y2="40" stroke="${c}" stroke-width="1"/>
+        <line x1="10" y1="55" x2="50" y2="55" stroke="${c}" stroke-width="1"/>
+        <line x1="10" y1="70" x2="50" y2="70" stroke="${c}" stroke-width="1"/>
+        <line x1="70" y1="25" x2="110" y2="25" stroke="${c}" stroke-width="1"/>
+        <line x1="70" y1="40" x2="110" y2="40" stroke="${c}" stroke-width="1"/>
+        <line x1="70" y1="55" x2="110" y2="55" stroke="${c}" stroke-width="1"/>
+        <line x1="70" y1="70" x2="110" y2="70" stroke="${c}" stroke-width="1"/>
+        <polygon points="50,82 60,90 50,98" stroke="${c}" stroke-width="1" fill="none"/>
+        ${lbl(2, 28, 'din', c, 'start', '7')}
+        ${lbl(112, 28, 'dout', c, 'start', '7')}
+        ${lbl(60, 9, 'PIPE', c, 'middle', '8')}
+      </svg>`,
+      verilog: `always @(posedge clk)\n  if (en) data_out <= data_in;`,
+      truthTable: null,
+    },
+    {
+      name: 'Scratchpad Mem',
+      id: 'scratchpad_memory',
+      promptText: 'Design a multi-bank scratchpad memory for thread-group shared data (CUDA __shared__ equivalent)',
+      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+        <rect x="30" y="10" width="60" height="80" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
+        <line x1="30" y1="30" x2="90" y2="30" stroke="${c}" stroke-width="1"/>
+        <line x1="30" y1="50" x2="90" y2="50" stroke="${c}" stroke-width="1"/>
+        <line x1="30" y1="70" x2="90" y2="70" stroke="${c}" stroke-width="1"/>
+        ${lbl(60, 24, 'B0', c, 'middle', '8')}
+        ${lbl(60, 44, 'B1', c, 'middle', '8')}
+        ${lbl(60, 64, 'B2', c, 'middle', '8')}
+        ${lbl(60, 84, 'B3', c, 'middle', '8')}
+        <line x1="5" y1="20" x2="30" y2="20" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="40" x2="30" y2="40" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="60" x2="30" y2="60" stroke="${c}" stroke-width="1"/>
+        <line x1="90" y1="50" x2="115" y2="50" stroke="${c}" stroke-width="1"/>
+        <polygon points="30,80 38,86 30,92" stroke="${c}" stroke-width="1" fill="none"/>
+        ${lbl(2, 22, 'waddr', c, 'start', '7')}
+        ${lbl(2, 42, 'wdata', c, 'start', '7')}
+        ${lbl(2, 62, 'we', c, 'start', '7')}
+        ${lbl(117, 52, 'rdata', c, 'start', '7')}
+      </svg>`,
+      verilog: `reg [31:0] mem [0:255];\nalways @(posedge clk)\n  if (we) mem[waddr] <= wdata;\nassign rdata = mem[raddr];`,
+      truthTable: null,
+    },
+    {
+      name: 'Warp Scheduler',
+      id: 'warp_scheduler',
+      promptText: 'Design a round-robin warp scheduler that selects one of 4 thread groups per cycle',
+      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="25,20 25,80 95,55 95,45" stroke="${c}" stroke-width="1.8" fill="none"/>
+        <line x1="5" y1="28" x2="25" y2="28" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="42" x2="25" y2="42" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="58" x2="25" y2="58" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="72" x2="25" y2="72" stroke="${c}" stroke-width="1"/>
+        <line x1="95" y1="50" x2="115" y2="50" stroke="${c}" stroke-width="1.5"/>
+        <polygon points="25,82 35,89 25,96" stroke="${c}" stroke-width="1" fill="none"/>
+        <path d="M55,32 A12,12 0 1,1 55,68" stroke="${c}" stroke-width="1" fill="none"/>
+        <polygon points="55,32 60,34 58,28" stroke="${c}" stroke-width="0.8" fill="${c}"/>
+        ${lbl(2, 26, 'w0', c, 'start', '7')}
+        ${lbl(2, 40, 'w1', c, 'start', '7')}
+        ${lbl(2, 56, 'w2', c, 'start', '7')}
+        ${lbl(2, 70, 'w3', c, 'start', '7')}
+        ${lbl(117, 52, 'active', c, 'start', '7')}
+      </svg>`,
+      verilog: `always @(posedge clk)\n  if (rst) curr <= 0;\n  else     curr <= curr + 1;\nassign active_warp = curr;`,
+      truthTable: null,
+    },
+    {
+      name: 'Z-Buffer Cmp',
+      id: 'z_buffer_compare',
+      promptText: 'Design a Z-buffer depth comparison unit for graphics rendering',
+      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+        <rect x="20" y="20" width="75" height="60" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
+        <polygon points="40,35 70,50 40,65" stroke="${c}" stroke-width="1.2" fill="none"/>
+        ${lbl(55, 53, '<', c, 'middle', '11')}
+        <line x1="5" y1="35" x2="20" y2="35" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="65" x2="20" y2="65" stroke="${c}" stroke-width="1"/>
+        <line x1="95" y1="50" x2="115" y2="50" stroke="${c}" stroke-width="1.5"/>
+        ${lbl(2, 33, 'z_new', c, 'start', '7')}
+        ${lbl(2, 63, 'z_old', c, 'start', '7')}
+        ${lbl(117, 52, 'pass', c, 'start', '7')}
+      </svg>`,
+      verilog: `assign pass = (z_new < z_old);\nassign z_out = pass ? z_new : z_old;`,
+      truthTable: null,
+    },
+    {
+      name: 'Vec Reg File',
+      id: 'vector_register_file',
+      promptText: 'Design a 32-entry vector register file with 128-bit lanes, 2 read ports and 1 write port',
+      svg: (c) => `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+        <rect x="30" y="10" width="60" height="80" rx="3" stroke="${c}" stroke-width="1.8" fill="none"/>
+        <line x1="30" y1="25" x2="90" y2="25" stroke="${c}" stroke-width="0.8"/>
+        <line x1="30" y1="40" x2="90" y2="40" stroke="${c}" stroke-width="0.8"/>
+        <line x1="30" y1="55" x2="90" y2="55" stroke="${c}" stroke-width="0.8"/>
+        <line x1="30" y1="70" x2="90" y2="70" stroke="${c}" stroke-width="0.8"/>
+        ${lbl(60, 50, 'VRF', c, 'middle', '11')}
+        <line x1="5" y1="20" x2="30" y2="20" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="35" x2="30" y2="35" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="55" x2="30" y2="55" stroke="${c}" stroke-width="1"/>
+        <line x1="5" y1="75" x2="30" y2="75" stroke="${c}" stroke-width="1"/>
+        <line x1="90" y1="35" x2="115" y2="35" stroke="${c}" stroke-width="1"/>
+        <line x1="90" y1="65" x2="115" y2="65" stroke="${c}" stroke-width="1"/>
+        <polygon points="30,82 38,88 30,94" stroke="${c}" stroke-width="1" fill="none"/>
+        ${lbl(2, 22, 'ra1', c, 'start', '7')}
+        ${lbl(2, 37, 'ra2', c, 'start', '7')}
+        ${lbl(2, 57, 'wa', c, 'start', '7')}
+        ${lbl(2, 77, 'wd', c, 'start', '7')}
+        ${lbl(117, 37, 'rd1', c, 'start', '7')}
+        ${lbl(117, 67, 'rd2', c, 'start', '7')}
+      </svg>`,
+      verilog: `reg [127:0] vregs [0:31];\nalways @(posedge clk)\n  if (we) vregs[wa] <= wdata;\nassign rd1 = vregs[ra1];\nassign rd2 = vregs[ra2];`,
+      truthTable: null,
     },
   ],
 

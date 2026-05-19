@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Volta — Validation Suite
-Tests the chatbot validation system across 33 circuit combinations.
+Tests the chatbot validation system across 37 circuit combinations
+(including GPU/parallel-compute primitives).
 Verifies correct verdicts: WORKING, STANDALONE, INCOMPLETE, BROKEN, RISKY.
 
 Usage:
@@ -74,6 +75,15 @@ SYMBOL_NAMES = {
     "ram": "RAM", "rom": "ROM", "regfile": "Register File",
     "pc": "Program Counter", "clkgen": "Clock Gen",
     "imem": "Instruction Memory", "dmem": "Data Memory",
+    # GPU Components — display names compute_verdict normalizes via NAME_TO_ID
+    "simd_alu_4lane": "SIMD ALU",
+    "mac_array_4x4": "MAC Array",
+    "crossbar_4x4": "Crossbar Switch",
+    "pipeline_register": "Pipeline Reg",
+    "scratchpad_memory": "Scratchpad Mem",
+    "warp_scheduler": "Warp Scheduler",
+    "z_buffer_compare": "Z-Buffer Cmp",
+    "vector_register_file": "Vec Reg File",
 }
 
 
@@ -132,6 +142,12 @@ TEST_CASES = [
 
     # EDGE CASE (33)
     {"id": 33, "category": "Edge Case", "symbols": ["clkgen"], "prompt": "Design a clock divider that divides by 4", "expected_verdict": "INCOMPLETE", "notes": "Clock divider needs source clock input"},
+
+    # GPU COMPONENTS (34-37)
+    {"id": 34, "category": "GPU", "symbols": ["simd_alu_4lane"], "prompt": "Design a 4-lane SIMD ALU", "expected_verdict": "INCOMPLETE", "notes": "SIMD ALU needs operand vectors and opcode driver"},
+    {"id": 35, "category": "GPU", "symbols": ["mac_array_4x4"], "prompt": "Design a 4x4 systolic MAC array", "expected_verdict": "INCOMPLETE", "notes": "MAC array is sequential and needs operand matrices + clock"},
+    {"id": 36, "category": "GPU", "symbols": ["z_buffer_compare"], "prompt": "Design a Z-buffer depth comparator", "expected_verdict": "STANDALONE", "notes": "Z-buffer compare is a pure combinational depth comparator"},
+    {"id": 37, "category": "GPU", "symbols": ["simd_alu_4lane", "vector_register_file", "warp_scheduler", "scratchpad_memory", "clkgen"], "prompt": "Design a minimal GPU shader core", "expected_verdict": "WORKING", "notes": "SIMD ALU driven by vector reg file + scratchpad, scheduled by warp scheduler, clocked"},
 ]
 
 
@@ -409,7 +425,7 @@ def save_results(results: list):
 def main():
     print(f"\n{'=' * 70}")
     print(f"  {BOLD}{GREEN}VOLTA — Validation Suite{RESET}")
-    print(f"  {DIM}33 circuit combination tests{RESET}")
+    print(f"  {DIM}{len(TEST_CASES)} circuit combination tests{RESET}")
     print(f"{'=' * 70}\n")
 
     # Health checks
