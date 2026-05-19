@@ -1,4 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+
+// ---------------------------------------------------------------------------
+// Zoom/pan persistence — module-level so state survives the unmount/remount
+// that happens when the user clicks away from the SCHEMATIC tab and back.
+// The cache is keyed by the design string so a different design starts fresh.
+// ---------------------------------------------------------------------------
+const ZOOM_STEPS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
+const MIN_ZOOM = 0.25
+const MAX_ZOOM = 4.0
+let _persistedView = { zoom: 1, offsetX: 0, offsetY: 0 }
+let _persistedKey = ''
 
 /**
  * SchematicView — parses Verilog into a rich component graph and draws a
@@ -1410,8 +1421,9 @@ export default function SchematicView({
     )
   }
 
+  let subView
   if (parsed.kind === 'hierarchical') {
-    return (
+    subView = (
       <HierarchicalView
         module={parsed.module}
         template={parsed.template}
@@ -1420,26 +1432,293 @@ export default function SchematicView({
         logicIssues={logicIssues}
       />
     )
+  } else if (parsed.kind === 'module-fallback') {
+    subView = <ModuleFallbackView module={parsed.module} hasErrors={hasErrors} logicIssues={logicIssues} />
+  } else {
+    subView = (
+      <FlatView
+        module={parsed.module}
+        components={parsed.components}
+        signalOwners={parsed.signalOwners}
+        hasErrors={hasErrors}
+        design={design}
+        onGateClick={onGateClick}
+        hovered={hovered}
+        setHovered={setHovered}
+        hoveredSignal={hoveredSignal}
+        setHoveredSignal={setHoveredSignal}
+        logicIssues={logicIssues}
+      />
+    )
+  }
+  return <ZoomPanWrapper designKey={design || ''}>{subView}</ZoomPanWrapper>
+}
+
+// ---------------------------------------------------------------------------
+// Zoom + pan
+// ---------------------------------------------------------------------------
+
+function roundToNearestStep(z) {
+  let best = ZOOM_STEPS[0]
+  let bestDist = Math.abs(z - best)
+  for (const s of ZOOM_STEPS) {
+    const d = Math.abs(z - s)
+    if (d < bestDist) { best = s; bestDist = d }
+  }
+  return best
+}
+
+function nextStep(z, dir) {
+  const cur = roundToNearestStep(z)
+  if (dir > 0) {
+    for (const s of ZOOM_STEPS) if (s > cur + 1e-6) return s
+    return MAX_ZOOM
+  }
+  for (let i = ZOOM_STEPS.length - 1; i >= 0; i--) {
+    if (ZOOM_STEPS[i] < cur - 1e-6) return ZOOM_STEPS[i]
+  }
+  return MIN_ZOOM
+}
+
+const clampZoom = (z) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z))
+
+/**
+ * Wraps a schematic sub-view with zoom + pan. Transform is
+ * ``scale(zoom) translate(offsetX, offsetY)`` with origin top-left, so
+ * ``offsetX/Y`` are in pre-scale (content) units. Pan deltas are converted
+ * from screen pixels via division by ``zoom``.
+ *
+ * Persistence: zoom/offset are cached on a module-level variable so they
+ * survive the unmount/remount that happens when the user clicks away from
+ * the SCHEMATIC tab and back. Cache is keyed by ``designKey``; a different
+ * key resets to (1, 0, 0).
+ */
+function ZoomPanWrapper({ designKey, children }) {
+  const containerRef = useRef(null)
+  const dragStartRef = useRef(null)
+  const designRef = useRef(designKey)
+
+  const [zoom, setZoom] = useState(() =>
+    _persistedKey === designKey ? _persistedView.zoom : 1
+  )
+  const [offsetX, setOffsetX] = useState(() =>
+    _persistedKey === designKey ? _persistedView.offsetX : 0
+  )
+  const [offsetY, setOffsetY] = useState(() =>
+    _persistedKey === designKey ? _persistedView.offsetY : 0
+  )
+  const [isDragging, setIsDragging] = useState(false)
+
+  // Persist on every change.
+  useEffect(() => {
+    _persistedView = { zoom, offsetX, offsetY }
+    _persistedKey = designKey
+  }, [zoom, offsetX, offsetY, designKey])
+
+  // Reset on design change (e.g. a fresh GENERATE).
+  useEffect(() => {
+    if (designRef.current !== designKey) {
+      designRef.current = designKey
+      setZoom(1); setOffsetX(0); setOffsetY(0)
+    }
+  }, [designKey])
+
+  // When zoom drops back to 100% (or below), pan offset is meaningless —
+  // re-center automatically.
+  useEffect(() => {
+    if (zoom <= 1.0 + 1e-6) {
+      if (offsetX !== 0) setOffsetX(0)
+      if (offsetY !== 0) setOffsetY(0)
+    }
+  }, [zoom])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Zoom toward a point (anchorX, anchorY) in container-local pixels.
+  // Math derived from transform = scale(z) * translate(offsetX, offsetY):
+  //   screen_x = z * (content_x + offsetX)
+  // Keeping the same content point under the anchor after z changes gives
+  //   offsetX' = offsetX + anchorX * (1/z' - 1/z)
+  const zoomToward = (newZoomRaw, anchorX, anchorY) => {
+    const newZoom = clampZoom(newZoomRaw)
+    if (Math.abs(newZoom - zoom) < 1e-6) return
+    const k = 1 / newZoom - 1 / zoom
+    setOffsetX(offsetX + anchorX * k)
+    setOffsetY(offsetY + anchorY * k)
+    setZoom(newZoom)
   }
 
-  if (parsed.kind === 'module-fallback') {
-    return <ModuleFallbackView module={parsed.module} hasErrors={hasErrors} logicIssues={logicIssues} />
+  const zoomTowardCenter = (dir) => {
+    const el = containerRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    zoomToward(nextStep(zoom, dir), r.width / 2, r.height / 2)
+  }
+
+  const handleZoomIn = () => zoomTowardCenter(+1)
+  const handleZoomOut = () => zoomTowardCenter(-1)
+  const handleReset = () => {
+    setZoom(1); setOffsetX(0); setOffsetY(0)
+  }
+
+  // Cmd/Ctrl + wheel = zoom toward cursor. Plain scroll falls through so the
+  // browser handles it normally (no hijack).
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const onWheel = (e) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      e.preventDefault()
+      const r = el.getBoundingClientRect()
+      const ax = e.clientX - r.left
+      const ay = e.clientY - r.top
+      const factor = e.deltaY > 0 ? 0.88 : 1.14
+      zoomToward(zoom * factor, ax, ay)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [zoom, offsetX, offsetY])
+
+  // Keyboard: + / = / - / 0. Skip when an input/textarea/contenteditable is
+  // focused so we don't fight with typing.
+  useEffect(() => {
+    const onKey = (e) => {
+      const ae = document.activeElement
+      const tag = ae && ae.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (ae && ae.isContentEditable)) return
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomTowardCenter(+1) }
+      else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomTowardCenter(-1) }
+      else if (e.key === '0') { e.preventDefault(); handleReset() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoom, offsetX, offsetY])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const panEnabled = zoom > 1 + 1e-6
+
+  const onPointerDown = (e) => {
+    if (!panEnabled) return
+    dragStartRef.current = { x: e.clientX, y: e.clientY, ox: offsetX, oy: offsetY }
+    setIsDragging(true)
+    try { e.currentTarget.setPointerCapture(e.pointerId) } catch {}
+  }
+  const onPointerMove = (e) => {
+    if (!isDragging || !dragStartRef.current) return
+    const dx = (e.clientX - dragStartRef.current.x) / zoom
+    const dy = (e.clientY - dragStartRef.current.y) / zoom
+    setOffsetX(dragStartRef.current.ox + dx)
+    setOffsetY(dragStartRef.current.oy + dy)
+  }
+  const onPointerUp = (e) => {
+    if (!isDragging) return
+    setIsDragging(false)
+    dragStartRef.current = null
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch {}
   }
 
   return (
-    <FlatView
-      module={parsed.module}
-      components={parsed.components}
-      signalOwners={parsed.signalOwners}
-      hasErrors={hasErrors}
-      design={design}
-      onGateClick={onGateClick}
-      hovered={hovered}
-      setHovered={setHovered}
-      hoveredSignal={hoveredSignal}
-      setHoveredSignal={setHoveredSignal}
-      logicIssues={logicIssues}
-    />
+    <div
+      ref={containerRef}
+      style={{ position: 'relative', height: '100%', overflow: 'hidden' }}
+    >
+      <div
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        style={{
+          height: '100%',
+          width: '100%',
+          transform: `scale(${zoom}) translate(${offsetX}px, ${offsetY}px)`,
+          transformOrigin: 'top left',
+          willChange: 'transform',
+          cursor: panEnabled ? (isDragging ? 'grabbing' : 'grab') : 'default',
+        }}
+      >
+        {children}
+      </div>
+      <ZoomControls
+        zoom={zoom}
+        onZoomIn={handleZoomIn}
+        onZoomOut={handleZoomOut}
+        onReset={handleReset}
+      />
+    </div>
+  )
+}
+
+function ZoomControls({ zoom, onZoomIn, onZoomOut, onReset }) {
+  const pct = Math.round(zoom * 100)
+  return (
+    <div
+      // Stop the controls from also acting as a pan-drag handle.
+      onPointerDown={(e) => e.stopPropagation()}
+      style={{
+        position: 'absolute',
+        top: '12px',
+        right: '12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '4px',
+        zIndex: 5,
+        fontFamily: "'JetBrains Mono', monospace",
+      }}
+    >
+      <ZoomButton label="+" title="Zoom in (+, =)" onClick={onZoomIn} disabled={zoom >= MAX_ZOOM - 1e-6} />
+      <ZoomButton label="−" title="Zoom out (-)" onClick={onZoomOut} disabled={zoom <= MIN_ZOOM + 1e-6} />
+      <ZoomButton label="1:1" title="Reset zoom (0)" onClick={onReset} disabled={Math.abs(zoom - 1) < 1e-6} small />
+      <div style={{
+        marginTop: '2px',
+        padding: '2px 4px',
+        textAlign: 'center',
+        color: '#00ff41',
+        fontSize: '10px',
+        fontWeight: 600,
+        border: '1px solid #1a4a1a',
+        borderRadius: '2px',
+        background: 'rgba(0, 0, 0, 0.7)',
+        minWidth: '28px',
+      }}>
+        {pct}%
+      </div>
+    </div>
+  )
+}
+
+function ZoomButton({ label, title, onClick, disabled, small }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      style={{
+        width: '28px',
+        height: '28px',
+        padding: 0,
+        fontSize: small ? '10px' : '14px',
+        fontWeight: 700,
+        fontFamily: "'JetBrains Mono', monospace",
+        color: disabled ? '#3a5a3a' : '#00ff41',
+        background: '#000',
+        border: '1px solid #1a4a1a',
+        borderRadius: '2px',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        lineHeight: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+      onMouseEnter={(e) => {
+        if (disabled) return
+        e.currentTarget.style.borderColor = '#00ff41'
+        e.currentTarget.style.background = 'rgba(0, 255, 65, 0.10)'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = '#1a4a1a'
+        e.currentTarget.style.background = '#000'
+      }}
+    >
+      {label}
+    </button>
   )
 }
 
