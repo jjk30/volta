@@ -81,7 +81,14 @@ function ThinkingDots() {
   )
 }
 
-export default function ChatBot({ design, testbench, autoMessage, simResult, selectedSymbols = [], logicIssues = [] }) {
+/** Color for a selection-divider line, based on verdict bucket. */
+function selectionDividerColor(verdict) {
+  if (verdict === 'STANDALONE' || verdict === 'WORKING') return '#00ff41'
+  if (verdict === 'BROKEN') return '#ff4444'
+  return '#ffaa00'
+}
+
+export default function ChatBot({ design, testbench, autoMessage, simResult, selectedSymbols = [], logicIssues = [], selectionVerdict = null }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -89,6 +96,24 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
   const processedAutoRef = useRef(null)
   const messagesRef = useRef(messages)
   messagesRef.current = messages
+
+  // Sync a single "selection" divider line with the current verdict. Replace
+  // any previous selection-divider message rather than appending a new one.
+  // This is a pure local UI message — no /chat call, no LLM cost.
+  useEffect(() => {
+    setMessages((prev) => {
+      const filtered = prev.filter((m) => m.role !== 'selection')
+      if (!selectionVerdict) return filtered
+      const names = (selectedSymbols || []).map((s) => s.name).join(' + ')
+      const summary = selectionVerdict.shortSummary || selectionVerdict.verdict
+      const content = `— Selection: ${names || '(none)'} — ${summary}`
+      return [...filtered, {
+        role: 'selection',
+        content,
+        verdict: selectionVerdict.verdict,
+      }]
+    })
+  }, [selectionVerdict, selectedSymbols])
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -118,8 +143,11 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
     if (!isAuto) setInput('')
     setLoading(true)
 
-    // Filter out divider messages for history sent to backend
-    const historyForBackend = latestMessages.filter((m) => m.role !== 'divider')
+    // Filter out divider / selection messages for history sent to backend —
+    // these are local UI markers, not part of the conversation.
+    const historyForBackend = latestMessages.filter(
+      (m) => m.role !== 'divider' && m.role !== 'selection'
+    )
 
     try {
       const resp = await fetch(`${API_URL}/chat`, {
@@ -246,6 +274,19 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
               fontStyle: 'italic',
               padding: '8px 0',
               userSelect: 'none',
+            }}>
+              {msg.content}
+            </div>
+          ) : msg.role === 'selection' ? (
+            <div key={i} style={{
+              textAlign: 'center',
+              color: selectionDividerColor(msg.verdict),
+              fontSize: '10px',
+              fontStyle: 'italic',
+              padding: '6px 4px',
+              opacity: 0.85,
+              userSelect: 'none',
+              wordBreak: 'break-word',
             }}>
               {msg.content}
             </div>

@@ -44,6 +44,7 @@ export default function Toolbar({
   onToggleTheme = () => {},
   target = 'Icarus',
   setTarget = () => {},
+  selectionVerdict = null,
 }) {
 
   const handleGenerate = () => {
@@ -207,6 +208,9 @@ export default function Toolbar({
           }}
         />
       </div>
+
+      {/* Selection verdict badge — shown only when symbols are selected */}
+      <VerdictBadge verdict={selectionVerdict} />
 
       {/* GENERATE button (moved to right end) */}
       {generating ? (
@@ -396,6 +400,51 @@ function ThemeToggle({ theme, onToggle }) {
         {isLight ? <SunIcon /> : <MoonIcon />}
       </span>
     </button>
+  )
+}
+
+/**
+ * Compact pill badge that surfaces the live selection verdict next to the
+ * GENERATE button. Green for STANDALONE/WORKING, amber for INCOMPLETE/RISKY,
+ * red for BROKEN. Hidden when there is no verdict.
+ */
+function VerdictBadge({ verdict }) {
+  if (!verdict || !verdict.shortSummary) return null
+  const v = verdict.verdict
+  let fg, bg, border
+  if (v === 'STANDALONE' || v === 'WORKING') {
+    fg = '#00ff41'; bg = 'rgba(0, 255, 65, 0.10)'; border = 'rgba(0, 255, 65, 0.45)'
+  } else if (v === 'BROKEN') {
+    fg = '#ff4444'; bg = 'rgba(255, 68, 68, 0.12)'; border = 'rgba(255, 68, 68, 0.50)'
+  } else {
+    fg = '#ffaa00'; bg = 'rgba(255, 170, 0, 0.12)'; border = 'rgba(255, 170, 0, 0.50)'
+  }
+  const tooltipLines = [
+    `Verdict: ${v}`,
+    ...(verdict.reasons || []),
+  ].join('\n')
+  return (
+    <div
+      title={tooltipLines}
+      style={{
+        maxWidth: '280px',
+        padding: '3px 10px',
+        border: `1px solid ${border}`,
+        borderRadius: '10px',
+        background: bg,
+        color: fg,
+        fontSize: '10px',
+        fontWeight: 600,
+        fontFamily: "'JetBrains Mono', monospace",
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        flexShrink: 0,
+        letterSpacing: '0.3px',
+      }}
+    >
+      {verdict.shortSummary}
+    </div>
   )
 }
 

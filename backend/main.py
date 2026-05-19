@@ -2201,6 +2201,50 @@ async def synthesize(req: SynthesizeRequest):
         )
 
 
+class ValidateSelectionRequest(BaseModel):
+    symbolIds: list[str] = []
+    prompt: str = ""
+
+
+class ValidateSelectionResponse(BaseModel):
+    verdict: str
+    reasons: list[str]
+    shortSummary: str
+
+
+def _build_short_summary(verdict: str, reasons: list[str]) -> str:
+    first = reasons[0] if reasons else ""
+    if len(first) > 90:
+        first = first[:87].rstrip() + "..."
+    if verdict == "STANDALONE":
+        return "✓ Combinational — works as standalone module"
+    if verdict == "WORKING":
+        return "✓ Complete circuit"
+    if verdict == "INCOMPLETE":
+        return f"⚠ Incomplete — {first}" if first else "⚠ Incomplete"
+    if verdict == "BROKEN":
+        return f"✗ Broken — {first}" if first else "✗ Broken"
+    if verdict == "RISKY":
+        return f"⚠ Risky — {first}" if first else "⚠ Risky"
+    return verdict
+
+
+@app.post("/validate-selection", response_model=ValidateSelectionResponse)
+async def validate_selection(req: ValidateSelectionRequest):
+    """Deterministic verdict for the currently selected symbols.
+
+    No LLM call — purely reuses compute_verdict() so the UI can surface a
+    real-time judgement as the user clicks symbols in the library.
+    """
+    selected = [SelectedSymbolData(name=sid) for sid in (req.symbolIds or [])]
+    result = compute_verdict(selected, req.prompt or "")
+    return ValidateSelectionResponse(
+        verdict=result["verdict"],
+        reasons=result["reasons"],
+        shortSummary=_build_short_summary(result["verdict"], result["reasons"]),
+    )
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
