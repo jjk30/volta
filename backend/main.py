@@ -463,6 +463,22 @@ EXPLAIN_KEYWORDS = re.compile(
 
 KEYWORD_TO_SYMBOL = [
     # Order matters — more specific patterns first
+    # GPU Components — placed before the generic "alu"/"register"/"counter"
+    # keywords so multi-word matches win.
+    ("simd alu", "simdalu"), ("vector alu", "simdalu"), ("4-lane alu", "simdalu"),
+    ("4 lane alu", "simdalu"), ("simd", "simdalu"),
+    ("mac array", "macarray"), ("systolic array", "macarray"),
+    ("tensor core", "macarray"), ("systolic mac", "macarray"),
+    ("crossbar switch", "crossbar"), ("crossbar", "crossbar"), ("interconnect", "crossbar"),
+    ("pipeline register", "pipelinereg"), ("pipeline stage", "pipelinereg"),
+    ("pipeline reg", "pipelinereg"),
+    ("scratchpad memory", "scratchpad"), ("scratchpad", "scratchpad"),
+    ("shared memory", "scratchpad"), ("smem", "scratchpad"),
+    ("warp scheduler", "warpsched"), ("warp dispatch", "warpsched"),
+    ("z-buffer", "zbuffer"), ("z buffer", "zbuffer"),
+    ("depth compare", "zbuffer"), ("depth test", "zbuffer"),
+    ("vector register file", "vregfile"), ("vec reg file", "vregfile"),
+    ("vector regfile", "vregfile"), ("vregfile", "vregfile"), ("vreg", "vregfile"),
     ("d flip-flop", "dff"), ("d flipflop", "dff"), ("d flip flop", "dff"), ("dff", "dff"),
     ("jk flip-flop", "jkff"), ("jk flipflop", "jkff"), ("jk flip flop", "jkff"),
     ("t flip-flop", "tff"), ("t flipflop", "tff"), ("t flip flop", "tff"),
@@ -532,6 +548,17 @@ def compute_verdict(selected_symbols: list, prompt_text: str = "") -> dict:
         'datamemory': 'dmem', 'datamem': 'dmem', 'dmem': 'dmem',
         'clockgen': 'clkgen', 'clockgenerator': 'clkgen', 'clockdivider': 'clkgen', 'clkgen': 'clkgen',
         'controlunit': 'ctrl', 'ctrl': 'ctrl',
+        # GPU Components
+        'simdalu4lane': 'simdalu', 'simdalu': 'simdalu', 'vectoralu': 'simdalu', '4lanealu': 'simdalu',
+        'macarray4x4': 'macarray', 'macarray': 'macarray', 'systolicarray': 'macarray', 'tensorcore': 'macarray',
+        'crossbarswitch': 'crossbar', 'crossbar4x4': 'crossbar', 'crossbar': 'crossbar',
+        'pipelineregister': 'pipelinereg', 'pipelinereg': 'pipelinereg', 'pipelinestage': 'pipelinereg',
+        'scratchpadmemory': 'scratchpad', 'scratchpad': 'scratchpad', 'sharedmemory': 'scratchpad', 'smem': 'scratchpad',
+        'warpscheduler': 'warpsched', 'warpdispatch': 'warpsched', 'warpsched': 'warpsched',
+        'zbuffercompare': 'zbuffer', 'zbufferdepth': 'zbuffer', 'zbuffer': 'zbuffer',
+        'depthcompare': 'zbuffer', 'depthtest': 'zbuffer',
+        'vectorregisterfile': 'vregfile', 'vectorregfile': 'vregfile',
+        'vecregfile': 'vregfile', 'vregfile': 'vregfile',
     }
     # Sort by key length descending for longest-match-first
     sorted_names = sorted(NAME_TO_ID.keys(), key=len, reverse=True)
@@ -592,7 +619,15 @@ def compute_verdict(selected_symbols: list, prompt_text: str = "") -> dict:
     has_data_source = bool(sym_ids & PROVIDES_DATA_IDS)
 
     if needs_operands and not has_data_source:
-        reasons.append("ALU needs operand sources and opcode driver — none selected.")
+        operand_consumers = sym_ids & NEEDS_OPERANDS_IDS
+        labels = {
+            'alu': 'ALU',
+            'simdalu': 'SIMD ALU',
+            'macarray': 'MAC array',
+            'crossbar': 'Crossbar switch',
+        }
+        names = ', '.join(labels.get(i, i) for i in sorted(operand_consumers))
+        reasons.append(f"{names} needs operand/select sources — none selected.")
         return {"verdict": "INCOMPLETE", "reasons": reasons}
 
     if needs_address and not has_data_source:
@@ -630,20 +665,45 @@ COMBINATIONAL_IDS = {
     'dec24', 'prienc',
     'fulladd', 'halfadd', 'cmp', 'shifter', 'sext',
     'alu',  # combinational but needs driving (checked separately via NEEDS_OPERANDS)
+    # GPU
+    'simdalu',   # combinational lanes — needs operands (checked via NEEDS_OPERANDS)
+    'crossbar',  # combinational mux fabric — needs select drivers (NEEDS_OPERANDS)
+    'zbuffer',   # pure depth comparator
 }
 # SEQUENTIAL: clock or address driver REQUIRED
 SEQUENTIAL_IDS = {
     'dff', 'jkff', 'tff', 'srlatch',
     'reg', 'ram', 'rom', 'regfile', 'pc', 'dmem', 'imem',
     'clkgen', 'ctrl',
+    # GPU
+    'pipelinereg', 'scratchpad', 'warpsched', 'vregfile', 'macarray',
 }
 
 SELF_CONTAINED_IDS = {'clkgen'}
-NEEDS_CLOCK_IDS = {'dff', 'jkff', 'tff', 'reg', 'ram', 'regfile', 'pc', 'dmem'}
-NEEDS_OPERANDS_IDS = {'alu'}  # Only ALU truly needs operand sources + opcode driver
-NEEDS_ADDRESS_IDS = {'ram', 'rom', 'regfile', 'dmem', 'imem'}
+NEEDS_CLOCK_IDS = {
+    'dff', 'jkff', 'tff', 'reg', 'ram', 'regfile', 'pc', 'dmem',
+    # GPU
+    'pipelinereg', 'scratchpad', 'warpsched', 'vregfile', 'macarray',
+}
+NEEDS_OPERANDS_IDS = {
+    'alu',
+    # GPU — these are blocks that take in vector/matrix operand inputs and
+    # need explicit data drivers in the selection.
+    'simdalu', 'macarray', 'crossbar',
+}
+NEEDS_ADDRESS_IDS = {
+    'ram', 'rom', 'regfile', 'dmem', 'imem',
+    # GPU
+    'scratchpad', 'vregfile',
+}
 PROVIDES_CLOCK_IDS = {'clkgen'}
-PROVIDES_DATA_IDS = {'reg', 'regfile', 'pc', 'ram', 'rom', 'dmem', 'imem'}
+PROVIDES_DATA_IDS = {
+    'reg', 'regfile', 'pc', 'ram', 'rom', 'dmem', 'imem',
+    # GPU — register file and scratchpad can drive ALU/MAC operand inputs;
+    # warp scheduler produces an active-warp signal that downstream blocks
+    # consume.
+    'vregfile', 'scratchpad', 'warpsched',
+}
 
 STRICT_REVIEWER_PROMPT = """
 You are NOT a customer service agent. Students benefit from honest critique, not false praise.
