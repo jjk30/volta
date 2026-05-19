@@ -151,6 +151,9 @@ function App() {
   const [symbolsCollapsed, setSymbolsCollapsed] = useState(false)
   const [logicIssues, setLogicIssues] = useState([])  // [{line, severity, code, message, snippet}]
 
+  // Real-time verdict for the current selection (filled by /validate-selection)
+  const [selectionVerdict, setSelectionVerdict] = useState(null)
+
   // Target (Icarus | iCE40 FPGA | ECP5 FPGA) drives whether SIM runs a
   // simulation or kicks off Yosys FPGA synthesis.
   const [target, setTarget] = useState('Icarus')
@@ -494,6 +497,33 @@ function App() {
     setDesign(preview)
   }, [selectedSymbols])
 
+  // Real-time selection validation. Debounced 300ms so rapid clicks don't
+  // hammer the backend. The endpoint is deterministic and instant — no LLM.
+  useEffect(() => {
+    if (selectedSymbols.length === 0) {
+      setSelectionVerdict(null)
+      return
+    }
+    const symbolIds = selectedSymbols.map((s) => s.id)
+    const promptText = prompt
+    let cancelled = false
+    const handle = setTimeout(async () => {
+      try {
+        const resp = await fetch(`${API_URL}/validate-selection`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbolIds, prompt: promptText }),
+        })
+        if (!resp.ok) return
+        const data = await resp.json()
+        if (!cancelled) setSelectionVerdict(data)
+      } catch {
+        // Silently swallow — this is a non-critical UX hint, not a blocker
+      }
+    }, 300)
+    return () => { cancelled = true; clearTimeout(handle) }
+  }, [selectedSymbols, prompt])
+
   // Disconnect: if user manually edits prompt to differ from auto, clear symbols
   const handlePromptChange = useCallback((val) => {
     setPrompt(val)
@@ -546,6 +576,7 @@ function App() {
         onToggleTheme={toggleTheme}
         target={target}
         setTarget={setTarget}
+        selectionVerdict={selectionVerdict}
       />
       <ProgressIndicator active={generating} done={generateDone} />
       <ProgressIndicator
@@ -638,6 +669,8 @@ function App() {
                   hasErrors={!!simResult?.stderr}
                   onGateClick={handleGateClick}
                   logicIssues={logicIssues}
+                  selectedSymbols={selectedSymbols}
+                  selectionVerdict={selectionVerdict}
                 />
               )}
               {editorTab === 'DIAGRAM' && (
@@ -670,6 +703,10 @@ function App() {
             <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
               {bottomTab === 'CONSOLE' && (
                 <div style={{ height: '100%', overflow: 'auto', padding: '6px 12px', fontSize: '11px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-dim)' }}>
+                  <ConsoleValidationLine
+                    verdict={selectionVerdict}
+                    selectedSymbols={selectedSymbols}
+                  />
                   {/* FPGA synthesis log (when target is an FPGA) */}
                   {synthLog.length > 0 && (
                     <div style={{ marginBottom: synthLog.length && (simResult?.stderr || simResult?.stdout) ? '10px' : 0 }}>
@@ -786,6 +823,7 @@ function App() {
               simResult={simResult}
               selectedSymbols={selectedSymbols}
               logicIssues={logicIssues}
+              selectionVerdict={selectionVerdict}
             />
           </div>
           <div
@@ -837,6 +875,47 @@ function CollapsibleSymbolsHeader({ collapsed, onToggle }) {
         transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)',
       }}>▼</span>
       COLLAPSIBLE SYMBOLS LIBRARY
+    </div>
+  )
+}
+
+/** Color triplet for a verdict — used by badge, chat divider, and console line. */
+export function verdictColors(verdict) {
+  if (verdict === 'STANDALONE' || verdict === 'WORKING') {
+    return { fg: '#00ff41', bg: 'rgba(0, 255, 65, 0.10)', border: 'rgba(0, 255, 65, 0.45)' }
+  }
+  if (verdict === 'BROKEN') {
+    return { fg: '#ff4444', bg: 'rgba(255, 68, 68, 0.12)', border: 'rgba(255, 68, 68, 0.50)' }
+  }
+  // INCOMPLETE / RISKY → amber
+  return { fg: '#ffaa00', bg: 'rgba(255, 170, 0, 0.12)', border: 'rgba(255, 170, 0, 0.50)' }
+}
+
+/**
+ * Top-of-console [VALIDATION] status line. Hidden when there's no current
+ * selection verdict.
+ */
+function ConsoleValidationLine({ verdict, selectedSymbols }) {
+  if (!verdict) return null
+  const colors = verdictColors(verdict.verdict)
+  const names = (selectedSymbols || []).map((s) => s.name).join(' + ') || '(none)'
+  const tag = verdict.verdict === 'STANDALONE' ? 'WORKING AS STANDALONE'
+            : verdict.verdict
+  const detail = verdict.reasons && verdict.reasons[0] ? verdict.reasons[0] : ''
+  return (
+    <div style={{
+      padding: '4px 8px',
+      marginBottom: '8px',
+      border: `1px solid ${colors.border}`,
+      background: colors.bg,
+      color: colors.fg,
+      borderRadius: '3px',
+      fontSize: '10px',
+      fontFamily: "'JetBrains Mono', monospace",
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+    }}>
+      [VALIDATION] {tag}: {names}{detail ? ` — ${detail}` : ''}
     </div>
   )
 }

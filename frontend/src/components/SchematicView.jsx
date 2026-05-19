@@ -1379,10 +1379,30 @@ function renderComponent(comp, opts = {}) {
 // PART 8 — Main view
 // ============================================================================
 
-export default function SchematicView({ design, hasErrors = false, onGateClick, logicIssues = [] }) {
+export default function SchematicView({
+  design,
+  hasErrors = false,
+  onGateClick,
+  logicIssues = [],
+  selectedSymbols = [],
+  selectionVerdict = null,
+}) {
   const parsed = useMemo(() => parseDesign(design || ''), [design])
   const [hovered, setHovered] = useState(null)
   const [hoveredSignal, setHoveredSignal] = useState(null)
+
+  // When the editor is still showing the pre-GENERATE preview text built from
+  // selected symbols, prefer the labelled-box placeholder over whatever
+  // parseDesign() might salvage from the loose snippets.
+  const isSelectionPreview = (design || '').includes('=== PREVIEW: click GENERATE')
+  if ((!parsed || isSelectionPreview) && (selectedSymbols || []).length > 0) {
+    return (
+      <SelectionPreview
+        symbols={selectedSymbols}
+        verdict={selectionVerdict}
+      />
+    )
+  }
 
   if (!parsed) {
     return (
@@ -1515,6 +1535,119 @@ function PlaceholderSchematic({ message }) {
       fontSize: '11px', fontFamily: "'JetBrains Mono', monospace",
     }}>
       {message}
+    </div>
+  )
+}
+
+/**
+ * Pre-generation preview: stacks each selected symbol as a labelled box so
+ * the user can see what they've picked before clicking GENERATE. If the
+ * verdict flags an issue (INCOMPLETE/BROKEN/RISKY), every box gets a
+ * warning-colored border and a ⚠ icon, since we don't have per-symbol
+ * attribution from the deterministic verdict.
+ */
+function SelectionPreview({ symbols, verdict }) {
+  const verdictKind = verdict?.verdict
+  const isIssue = verdictKind === 'INCOMPLETE' || verdictKind === 'BROKEN' || verdictKind === 'RISKY'
+  const issueColor = verdictKind === 'BROKEN' ? 'var(--error, #ff4444)'
+                                              : 'var(--warning, #ffaa00)'
+  const boxBorder = isIssue ? `2px solid ${issueColor}` : '1px solid var(--border-primary)'
+  const accent = 'var(--schematic-accent, #00cc33)'
+  return (
+    <div style={{
+      height: '100%',
+      overflow: 'auto',
+      background: 'var(--bg-primary)',
+      fontFamily: "'JetBrains Mono', monospace",
+      padding: '16px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '10px',
+      alignItems: 'center',
+    }}>
+      <div style={{
+        color: 'var(--text-dim)',
+        fontSize: '11px',
+        fontStyle: 'italic',
+        textAlign: 'center',
+        marginBottom: '4px',
+      }}>
+        Preview — click GENERATE to wire them together
+      </div>
+      {verdict?.shortSummary && (
+        <div style={{
+          color: isIssue ? issueColor : accent,
+          fontSize: '10px',
+          textAlign: 'center',
+          letterSpacing: '0.4px',
+        }}>
+          {verdict.shortSummary}
+        </div>
+      )}
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px',
+        width: '100%',
+        maxWidth: '520px',
+      }}>
+        {symbols.map((sym) => (
+          <div
+            key={sym.id}
+            style={{
+              position: 'relative',
+              border: boxBorder,
+              borderRadius: '4px',
+              background: 'var(--bg-surface)',
+              padding: '10px 12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '14px',
+            }}
+          >
+            {isIssue && (
+              <div
+                title={`${verdictKind}: ${(verdict?.reasons || [])[0] || ''}`}
+                style={{
+                  position: 'absolute',
+                  top: '-9px',
+                  right: '-9px',
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '50%',
+                  background: issueColor,
+                  color: 'var(--bg-primary)',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                !
+              </div>
+            )}
+            <div
+              style={{ width: '110px', height: '70px', flexShrink: 0 }}
+              dangerouslySetInnerHTML={{
+                __html: (sym.svg ? sym.svg(accent) : '').replace(
+                  /<svg /,
+                  '<svg style="width:100%;height:100%" preserveAspectRatio="xMidYMid meet" ',
+                ),
+              }}
+            />
+            <div style={{
+              fontSize: '12px',
+              color: 'var(--accent-primary, #00ff41)',
+              fontWeight: 600,
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase',
+            }}>
+              {sym.name}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
