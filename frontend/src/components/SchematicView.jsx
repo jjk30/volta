@@ -2468,7 +2468,7 @@ function TopologyBanner() {
       fontSize: '10px', fontFamily: "'JetBrains Mono', monospace",
       letterSpacing: '0.5px', flexShrink: 0,
     }}>
-      Circuit topology error — see Volta Assistant for details
+      Verilog compilation error — see Volta Assistant for details
     </div>
   )
 }

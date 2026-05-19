@@ -136,6 +136,7 @@ def _fix_verilog(verilog: str) -> str:
     code = _fix_missing_semicolons(code)
     code = _fix_undeclared_regs(code)
     code = _fix_undeclared_inputs(code)
+    code = _fix_integer_placement(code)
     code = _fix_input_assignments(code)
     code = _fix_carry_logic(code)
     code = _fix_number_literals(code)
@@ -758,6 +759,125 @@ def _fix_undeclared_inputs(verilog: str) -> str:
         new_lines.append(line)
 
     return "\n".join(new_lines)
+
+
+def _fix_integer_placement(verilog: str) -> str:
+    """Hoist integer/reg/genvar declarations out of mid-block positions to
+    the top of their enclosing ``always`` body.
+
+    Verilog requires variable declarations to precede procedural statements
+    inside a begin/end. The model occasionally emits::
+
+        always @(posedge clk) begin
+          if (rst) begin
+            x <= 0;
+            integer i;          // ← illegal: declaration after statement
+            for (i = 0; ...) ...
+          end
+        end
+
+    Iverilog rejects that. This pass walks each ``always`` block, finds
+    declarations (``integer``, ``reg``, ``genvar``) that appear after a
+    procedural statement (at any depth), strips them, and re-inserts them on
+    the line directly after the outermost ``begin``. Indentation matches the
+    rest of the block body.
+    """
+
+    decl_re = re.compile(r'^(\s*)(integer|reg|genvar)\b[^;]*;\s*(?://.*)?$')
+    # `end` tokens that close non-begin/end constructs and should NOT
+    # decrement the begin/end depth.
+    block_tok_re = re.compile(
+        r'\b(begin|end(?:case|module|function|task|generate|primitive)?)\b'
+    )
+    structural_only_re = re.compile(r'^\s*(?:begin|end)\b\s*(?::\s*\w+)?\s*$')
+    always_re = re.compile(r'^\s*always\b')
+
+    lines = verilog.split('\n')
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not always_re.match(line):
+            out.append(line)
+            i += 1
+            continue
+
+        # Locate the opening `begin` for this always (may be on this line or
+        # on a following line — single-statement always has no begin).
+        begin_line = -1
+        for j in range(i, len(lines)):
+            if re.search(r'\bbegin\b', lines[j]):
+                begin_line = j
+                break
+        if begin_line < 0:
+            out.append(line)
+            i += 1
+            continue
+
+        # Walk begin/end depth from the opening `begin` to its match.
+        depth = 0
+        end_line = -1
+        for j in range(begin_line, len(lines)):
+            for tok in block_tok_re.findall(lines[j]):
+                if tok == 'begin':
+                    depth += 1
+                elif tok == 'end':
+                    depth -= 1
+                    if depth == 0:
+                        end_line = j
+                        break
+            if end_line >= 0:
+                break
+        if end_line < 0:
+            out.append(line)
+            i += 1
+            continue
+
+        # Scan the body: hoist any declaration that appears AFTER a real
+        # procedural statement to the top of the always body.
+        statement_seen = False
+        hoisted: list[str] = []
+        body_lines: list[str] = []
+        for j in range(begin_line + 1, end_line):
+            ln = lines[j]
+            stripped = ln.strip()
+            m_decl = decl_re.match(ln)
+            if m_decl:
+                if statement_seen:
+                    hoisted.append(stripped)
+                    continue
+                body_lines.append(ln)
+                continue
+            if not stripped or stripped.startswith('//') or stripped.startswith('/*'):
+                body_lines.append(ln)
+                continue
+            if not structural_only_re.match(ln):
+                statement_seen = True
+            body_lines.append(ln)
+
+        # Emit: header up to the opening `begin`, then the hoisted decls,
+        # then the rewritten body, then the closing `end`.
+        out.extend(lines[i:begin_line + 1])
+        if hoisted:
+            # Use the indent of the first non-empty body line; fall back to
+            # the begin's indent + two spaces.
+            body_indent = None
+            for body_l in body_lines:
+                m = re.match(r'^(\s*)\S', body_l)
+                if m and m.group(1):
+                    body_indent = m.group(1)
+                    break
+            if body_indent is None:
+                begin_indent_m = re.match(r'^(\s*)', lines[begin_line])
+                body_indent = (begin_indent_m.group(1) if begin_indent_m else '') + '  '
+            for hd in hoisted:
+                out.append(f"{body_indent}{hd}")
+        out.extend(body_lines)
+        out.append(lines[end_line])
+
+        i = end_line + 1
+
+    return '\n'.join(out)
 
 
 def _fix_input_assignments(verilog: str) -> str:
