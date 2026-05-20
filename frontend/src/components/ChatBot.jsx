@@ -88,7 +88,7 @@ function selectionDividerColor(verdict) {
   return '#ffaa00'
 }
 
-export default function ChatBot({ design, testbench, autoMessage, simResult, selectedSymbols = [], logicIssues = [], selectionVerdict = null }) {
+export default function ChatBot({ design, testbench, autoMessage, simResult, selectedSymbols = [], logicIssues = [], selectionVerdict = null, language = 'verilog' }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -155,6 +155,7 @@ export default function ChatBot({ design, testbench, autoMessage, simResult, sel
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
+          language,
           design: design || '',
           testbench: testbench || '',
           history: historyForBackend,

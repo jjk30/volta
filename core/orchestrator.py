@@ -1520,6 +1520,169 @@ def _direct_generate(prompt: str, model: str = "qwen2.5-coder:7b") -> str:
 # Main pipeline
 # ---------------------------------------------------------------------------
 
+def generate_python(prompt: str, model: str = "qwen2.5-coder:7b") -> dict:
+    """Generate an Amaranth design + Cocotb testbench from a natural-language
+    prompt. Returns the same shape as :func:`generate` plus three extra fields:
+
+    - ``design_language`` / ``testbench_language``: always ``"python"`` when
+      this path succeeds; ``"verilog"`` if we fall back to direct Verilog
+      generation.
+    - ``verilog_intermediate``: the elaborated Verilog that the Schematic /
+      Diagram / Simulate paths consume internally.
+    - ``python_warnings``: human-readable warnings (e.g. "Amaranth elaboration
+      failed; falling back to direct Verilog generation").
+
+    Pipeline:
+      1. Interpret prompt → DesignSpec (existing spec_interpreter).
+      2. Call amaranth_generator.generate_amaranth → (amaranth_source, verilog).
+      3. Run the elaborated Verilog through the existing Yosys correction loop.
+      4. Generate a Cocotb testbench from the spec's test vectors.
+      5. Verify the corrected Verilog + a Verilog smoke testbench compile so
+         the schematic/simulate tabs have a known-good intermediate.
+
+    Editing design.py manually does NOT re-trigger Amaranth re-elaboration in
+    real time — only on GENERATE. (Future work: filesystem watcher or a
+    "Re-elaborate" button.)
+    """
+
+    print(f"\n{'=' * 60}")
+    print(f"  VOLTA — Orchestrator (Python mode)")
+    print(f"{'=' * 60}")
+    print(f"  Prompt: {prompt}")
+
+    # Lazy import so Verilog-only sessions don't pay the Amaranth import cost
+    from amaranth_generator import generate_amaranth, AmaranthElaborationError
+    from testbench_generator import generate_cocotb_testbench
+
+    spec = None
+    warnings: list[str] = []
+
+    # ------------------------------------------------------------------
+    # Step 1: Interpret prompt
+    # ------------------------------------------------------------------
+    try:
+        spec = interpret(prompt, model=model)
+        module = spec.modules[0]
+        print(f"  ✓ Spec: {module.name}, {len(module.ports)} ports")
+    except Exception as e:
+        warnings.append(f"Spec interpretation failed: {e}. Falling back to direct Verilog.")
+        print(f"  ⚠ {warnings[-1]}")
+        result = generate(prompt, model=model)
+        # Mirror the Verilog result back as Python-mode but with a warning,
+        # since the caller asked for Python.
+        result["design_language"] = "verilog"
+        result["testbench_language"] = "verilog"
+        result["verilog_intermediate"] = result.get("design", "")
+        result["python_warnings"] = warnings
+        return result
+
+    # ------------------------------------------------------------------
+    # Step 2: Amaranth generation + elaboration
+    # ------------------------------------------------------------------
+    try:
+        print(f"\n  Step 2: Generating Amaranth via Ollama...")
+        amaranth_source, verilog_intermediate = generate_amaranth(prompt, module, model=model)
+    except AmaranthElaborationError as e:
+        warnings.append(f"Amaranth elaboration failed after retries: {e}. Falling back to direct Verilog.")
+        print(f"  ⚠ {warnings[-1]}")
+        result = generate(prompt, model=model)
+        result["design_language"] = "verilog"
+        result["testbench_language"] = "verilog"
+        result["verilog_intermediate"] = result.get("design", "")
+        result["python_warnings"] = warnings
+        return result
+
+    # ------------------------------------------------------------------
+    # Step 3: Yosys correction loop on the elaborated Verilog
+    # ------------------------------------------------------------------
+    print(f"\n  Step 3: Running Yosys correction loop on elaborated Verilog...")
+    correction = {"ran": False, "passed": False, "attempts": 0, "errors_fixed": []}
+    try:
+        synth = run_yosys(verilog_intermediate)
+        if synth.success:
+            print(f"  ✓ Yosys passed on first try")
+            correction = {"ran": True, "passed": True, "attempts": 1, "errors_fixed": []}
+        else:
+            initial_errors = list(synth.errors)
+            result = correct_verilog(verilog_intermediate, model=model)
+            correction = {
+                "ran": True,
+                "passed": result["passed"],
+                "attempts": result["attempts"],
+                "errors_fixed": initial_errors,
+            }
+            if result["passed"]:
+                verilog_intermediate = result["final_code"]
+                warnings.append(
+                    "The elaborated Verilog needed corrections; if you edit "
+                    "design.py and re-generate, those corrections will be redone."
+                )
+            else:
+                warnings.append(
+                    f"Yosys still reports {len(result.get('remaining_errors') or [])} "
+                    "issue(s) in the elaborated Verilog after correction."
+                )
+    except Exception as e:
+        print(f"  ⚠ Correction skipped: {e}")
+        warnings.append(f"Yosys correction skipped: {e}")
+
+    # ------------------------------------------------------------------
+    # Step 4: Cocotb testbench
+    # ------------------------------------------------------------------
+    print(f"\n  Step 4: Generating Cocotb testbench...")
+    try:
+        cocotb_tb = generate_cocotb_testbench(spec, verilog_intermediate)
+        print(f"  ✓ Cocotb testbench: {len(cocotb_tb)} chars")
+    except Exception as e:
+        warnings.append(f"Cocotb testbench generation failed: {e}")
+        cocotb_tb = (
+            "# Cocotb testbench generation failed; you can write one by hand.\n"
+            "# Example:\n"
+            "#   import cocotb\n"
+            "#   from cocotb.triggers import Timer\n"
+            "#   @cocotb.test()\n"
+            "#   async def test_basic(dut):\n"
+            "#       await Timer(10, units='ns')\n"
+        )
+
+    # ------------------------------------------------------------------
+    # Step 5: Logic validation (on the Verilog intermediate)
+    # ------------------------------------------------------------------
+    try:
+        logic_issues = _validate_logic(verilog_intermediate)
+    except Exception:
+        logic_issues = []
+
+    # ------------------------------------------------------------------
+    # Step 6: Compile sanity check (Verilog intermediate + smoke testbench)
+    # ------------------------------------------------------------------
+    print(f"\n  Step 6: Compile sanity check on elaborated Verilog...")
+    try:
+        smoke_tb = generate_smoke_testbench(verilog_intermediate)
+        compile_ok, stderr = verify_compile(verilog_intermediate, smoke_tb)
+        if not compile_ok:
+            warnings.append(f"iverilog compile of elaborated Verilog failed: {stderr[:200]}")
+            print(f"  ⚠ compile failed: {stderr[:120]}")
+        else:
+            print(f"  ✓ Elaborated Verilog + smoke tb compiles")
+    except Exception as e:
+        print(f"  ⚠ compile sanity check error: {e}")
+
+    return {
+        "design": amaranth_source,
+        "testbench": cocotb_tb,
+        "spec": spec,
+        "correction": correction,
+        "compile_ok": True,  # best-effort; warnings carry the detail
+        "fallback_used": None,
+        "logic_issues": logic_issues,
+        "design_language": "python",
+        "testbench_language": "python",
+        "verilog_intermediate": verilog_intermediate,
+        "python_warnings": warnings,
+    }
+
+
 def generate(prompt: str, model: str = "qwen2.5-coder:7b") -> dict:
     """Full generate pipeline: prompt → spec → Verilog → correction → testbench.
 

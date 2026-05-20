@@ -45,6 +45,8 @@ export default function Toolbar({
   target = 'Icarus',
   setTarget = () => {},
   selectionVerdict = null,
+  language = 'verilog',
+  setLanguage = () => {},
 }) {
 
   const handleGenerate = () => {
@@ -136,11 +138,16 @@ export default function Toolbar({
       <div style={{ width: '1px', height: '18px', background: 'var(--border-primary)', flexShrink: 0 }} />
 
       {/* Compact inline dropdowns */}
-      <select defaultValue="Verilog" style={selectStyle}>
+      <select
+        value={language === 'python' ? 'Python' : 'Verilog'}
+        onChange={(e) => setLanguage(e.target.value === 'Python' ? 'python' : 'verilog')}
+        style={{ ...selectStyle, width: '210px' }}
+        title="Source language for the design and testbench"
+      >
         <option value="Verilog">Verilog</option>
+        <option value="Python">Python (Amaranth + Cocotb)</option>
         <option disabled>SystemVerilog</option>
         <option disabled>VHDL</option>
-        <option disabled>Python (Cocotb)</option>
         <option disabled>C++ (SystemC)</option>
       </select>
 

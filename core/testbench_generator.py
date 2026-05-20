@@ -117,6 +117,20 @@ def generate_test_file(module: ModuleSpec) -> str:
     return "\n".join(lines)
 
 
+def generate_cocotb_testbench(spec: DesignSpec, verilog_source: str = "") -> str:
+    """User-facing wrapper around :func:`generate_test_file`.
+
+    Produces the Cocotb Python testbench string that shows up in the
+    TEST_DESIGN.PY tab when the user is in Python mode. Operates on the first
+    module in the spec (Volta is single-module today). The ``verilog_source``
+    argument is accepted for API parity with the user spec but is unused — the
+    cocotb runner reads the Verilog from disk, not from the testbench string.
+    """
+    if not spec.modules:
+        raise ValueError("DesignSpec has no modules")
+    return generate_test_file(spec.modules[0])
+
+
 # ---------------------------------------------------------------------------
 # Makefile generator (Cocotb + Verilator)
 # ---------------------------------------------------------------------------

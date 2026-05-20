@@ -57,8 +57,13 @@ function HorizDragHandle({ onMouseDown }) {
   )
 }
 
-/** Tab header bar */
-function TabBar({ tabs, active, onChange }) {
+/** Tab header bar.
+ *  `tabs` is the canonical id list (used internally as state keys).
+ *  `labels` optionally remaps an id → user-visible label without changing
+ *  the underlying key, so language switches can flip DESIGN.V → DESIGN.PY
+ *  without breaking the rest of the app.
+ */
+function TabBar({ tabs, active, onChange, labels = null }) {
   return (
     <div style={{
       display: 'flex',
@@ -85,7 +90,7 @@ function TabBar({ tabs, active, onChange }) {
             transition: 'all 0.15s',
           }}
         >
-          {tab}
+          {(labels && labels[tab]) || tab}
         </button>
       ))}
     </div>
@@ -154,6 +159,14 @@ function App() {
   // Real-time verdict for the current selection (filled by /validate-selection)
   const [selectionVerdict, setSelectionVerdict] = useState(null)
 
+  // Source language ('verilog' default, 'python' = Amaranth design + Cocotb tb)
+  const [language, setLanguage] = useState('verilog')
+  const isPython = language === 'python'
+  // In Python mode, /generate also returns the elaborated Verilog so the
+  // schematic and simulate paths have a stable intermediate without
+  // re-elaborating on every interaction.
+  const [verilogIntermediate, setVerilogIntermediate] = useState('')
+
   // Target (Icarus | iCE40 FPGA | ECP5 FPGA) drives whether SIM runs a
   // simulation or kicks off Yosys FPGA synthesis.
   const [target, setTarget] = useState('Icarus')
@@ -214,7 +227,10 @@ function App() {
       const resp = await fetch(`${API_URL}/simulate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ design, testbench }),
+        body: JSON.stringify({
+          design, testbench, language,
+          verilog_intermediate: verilogIntermediate,
+        }),
         signal: controller.signal,
       })
       if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`) }
@@ -228,7 +244,7 @@ function App() {
       else setError(e.message)
       setSimResult(null)
     } finally { setSimulating(false); simulateControllerRef.current = null }
-  }, [design, testbench])
+  }, [design, testbench, language, verilogIntermediate])
 
   const handleCancelSimulate = useCallback(() => { simulateControllerRef.current?.abort() }, [])
 
@@ -244,7 +260,7 @@ function App() {
       const resp = await fetch(`${API_URL}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, language }),
         signal: controller.signal,
       })
       if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`) }
@@ -253,15 +269,21 @@ function App() {
       setTestbench(data.testbench)
       setSavedDesign(data.design)        // mark as just-saved
       setLogicIssues(data.logic_issues || [])
+      // In Python mode the backend also returns the elaborated Verilog so
+      // the schematic and simulate paths have a stable intermediate without
+      // re-elaborating Amaranth on every interaction.
+      setVerilogIntermediate(data.verilog_intermediate || '')
       setGenerateDone(true)
       setTimeout(() => setGenerateDone(false), 3000)
       setChatAutoMessage(`explain-${Date.now()}`)
-      setEditorTab('DESIGN.V')            // stay on DESIGN.V after generate
+      // Stay on the design tab after generate — the label flips to DESIGN.PY
+      // automatically when language === 'python'.
+      setEditorTab('DESIGN.V')
     } catch (e) {
       if (e.name === 'AbortError') { setCancelled('generate'); setTimeout(() => setCancelled(null), 2000) }
       else setError(e.message)
     } finally { setGenerating(false); generateControllerRef.current = null }
-  }, [])
+  }, [language])
 
   const handleCancelGenerate = useCallback(() => { generateControllerRef.current?.abort() }, [])
 
@@ -276,7 +298,7 @@ function App() {
       const resp = await fetch(`${API_URL}/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ design, prompt }),
+        body: JSON.stringify({ design, prompt, language }),
         signal: controller.signal,
       })
       if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || `HTTP ${resp.status}`) }
@@ -287,7 +309,7 @@ function App() {
       if (e.name === 'AbortError') { setCancelled('verify'); setTimeout(() => setCancelled(null), 2000) }
       else setError(e.message)
     } finally { setVerifying(false); verifyControllerRef.current = null }
-  }, [design, prompt])
+  }, [design, prompt, language])
 
   const handleCancelVerify = useCallback(() => { verifyControllerRef.current?.abort() }, [])
 
@@ -489,13 +511,23 @@ function App() {
     setAutoPrompt(text)
     setPrompt(text)
 
-    // Build Verilog preview from snippets
-    const snippets = selectedSymbols.map((s) =>
-      `// ${s.name}\n${s.verilog || '// (no snippet)'}`
-    )
-    const preview = `// === PREVIEW: click GENERATE to build the full module ===\n\n${snippets.join('\n\n')}\n`
-    setDesign(preview)
-  }, [selectedSymbols])
+    // Build a preview from the per-symbol snippets — Verilog by default,
+    // Amaranth snippets in Python mode. Commented header tells the user to
+    // click GENERATE to materialise the wired-up module.
+    if (isPython) {
+      const snippets = selectedSymbols.map((s) =>
+        `# ${s.name}\n${s.python_snippet || '# (no snippet)'}`
+      )
+      const preview = `# === PREVIEW: click GENERATE to build the full Amaranth module ===\n\n${snippets.join('\n\n')}\n`
+      setDesign(preview)
+    } else {
+      const snippets = selectedSymbols.map((s) =>
+        `// ${s.name}\n${s.verilog || '// (no snippet)'}`
+      )
+      const preview = `// === PREVIEW: click GENERATE to build the full module ===\n\n${snippets.join('\n\n')}\n`
+      setDesign(preview)
+    }
+  }, [selectedSymbols, isPython])
 
   // Real-time selection validation. Debounced 300ms so rapid clicks don't
   // hammer the backend. The endpoint is deterministic and instant — no LLM.
@@ -512,7 +544,7 @@ function App() {
         const resp = await fetch(`${API_URL}/validate-selection`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbolIds, prompt: promptText }),
+          body: JSON.stringify({ symbolIds, prompt: promptText, language }),
         })
         if (!resp.ok) return
         const data = await resp.json()
@@ -522,7 +554,7 @@ function App() {
       }
     }, 300)
     return () => { cancelled = true; clearTimeout(handle) }
-  }, [selectedSymbols, prompt])
+  }, [selectedSymbols, prompt, language])
 
   // Disconnect: if user manually edits prompt to differ from auto, clear symbols
   const handlePromptChange = useCallback((val) => {
@@ -577,6 +609,8 @@ function App() {
         target={target}
         setTarget={setTarget}
         selectionVerdict={selectionVerdict}
+        language={language}
+        setLanguage={setLanguage}
       />
       <ProgressIndicator active={generating} done={generateDone} />
       <ProgressIndicator
@@ -605,6 +639,7 @@ function App() {
               activeEditorTab={editorTab}
               onSelectDesign={handleSelectDesignFile}
               onSelectTestbench={handleSelectTestbenchFile}
+              language={language}
             />
           </div>
           <div
@@ -646,6 +681,9 @@ function App() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <TabBar
               tabs={['DESIGN.V', 'TB_DESIGN.V', 'SCHEMATIC', 'DIAGRAM', 'WAVEFORM']}
+              labels={isPython
+                ? { 'DESIGN.V': 'DESIGN.PY', 'TB_DESIGN.V': 'TEST_DESIGN.PY' }
+                : null}
               active={editorTab}
               onChange={setEditorTab}
             />
@@ -655,17 +693,21 @@ function App() {
                 height: '100%',
                 display: editorTab === 'DESIGN.V' ? 'block' : 'none',
               }}>
-                <EditorPane ref={designEditorRef} value={design} onChange={setDesign} />
+                <EditorPane ref={designEditorRef} value={design} onChange={setDesign} language={language} />
               </div>
               <div style={{
                 height: '100%',
                 display: editorTab === 'TB_DESIGN.V' ? 'block' : 'none',
               }}>
-                <EditorPane value={testbench} onChange={setTestbench} />
+                <EditorPane value={testbench} onChange={setTestbench} language={language} />
               </div>
               {editorTab === 'SCHEMATIC' && (
                 <SchematicView
-                  design={design}
+                  // In Python mode, render from the elaborated Verilog
+                  // intermediate so Amaranth source doesn't get fed to the
+                  // Verilog parser. Falls back to design (Amaranth) if there
+                  // is no intermediate yet, which yields the placeholder.
+                  design={isPython ? (verilogIntermediate || '') : design}
                   hasErrors={!!simResult?.stderr}
                   onGateClick={handleGateClick}
                   logicIssues={logicIssues}
@@ -674,7 +716,7 @@ function App() {
                 />
               )}
               {editorTab === 'DIAGRAM' && (
-                <DiagramView design={design} theme={theme} />
+                <DiagramView design={isPython ? (verilogIntermediate || '') : design} theme={theme} />
               )}
               {editorTab === 'WAVEFORM' && (
                 simResult?.signals?.length > 0 ? (
@@ -824,6 +866,7 @@ function App() {
               selectedSymbols={selectedSymbols}
               logicIssues={logicIssues}
               selectionVerdict={selectionVerdict}
+              language={language}
             />
           </div>
           <div
