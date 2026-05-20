@@ -7,6 +7,7 @@ import { closeBrackets, closeBracketsKeymap, autocompletion } from '@codemirror/
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { linter } from '@codemirror/lint'
 import { verilog } from '@codemirror/legacy-modes/mode/verilog'
+import { python } from '@codemirror/lang-python'
 import { themeFor } from './oneDarkTheme.js'
 import { verilogLint } from './verilogLinter.js'
 import { verilogCompletion } from './verilogComplete.js'
@@ -18,7 +19,26 @@ function readCurrentTheme() {
   return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
 }
 
-const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
+// Per-language extension bundle. For Python we use the proper Lezer grammar
+// from @codemirror/lang-python; for Verilog we keep the legacy StreamLanguage
+// mode that was here before. Lint and autocomplete are language-specific too
+// — running the Verilog linter on Python would false-flag every line.
+function langExtensions(language) {
+  if (language === 'python') {
+    return [python()]
+  }
+  return [
+    StreamLanguage.define(verilog),
+    linter(verilogLint, { delay: 500 }),
+    autocompletion({
+      override: [verilogCompletion],
+      activateOnTyping: true,
+      maxRenderedOptions: 20,
+    }),
+  ]
+}
+
+const EditorPane = forwardRef(function EditorPane({ value, onChange, language = 'verilog' }, ref) {
   const containerRef = useRef(null)
   const viewRef = useRef(null)
   const onChangeRef = useRef(onChange)
@@ -27,6 +47,9 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
   // Compartment for the syntax-highlighting theme so we can swap it without
   // tearing down the editor (which would clobber cursor/undo state).
   const themeCompartment = useRef(new Compartment()).current
+  // Compartment for language + lint + autocomplete so we can swap between
+  // Verilog and Python without remounting either.
+  const langCompartment = useRef(new Compartment()).current
 
   // Expose imperative helpers to parent via ref
   useImperativeHandle(ref, () => ({
@@ -77,19 +100,9 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
         closeBrackets(),
         indentOnInput(),
         highlightSelectionMatches(),
-        StreamLanguage.define(verilog),
+        langCompartment.of(langExtensions(language)),
         themeCompartment.of(themeFor(initialTheme)),
         updateListener,
-
-        // Verilog linter — 500ms debounce
-        linter(verilogLint, { delay: 500 }),
-
-        // Verilog autocomplete — trigger after 2 chars or Ctrl+Space
-        autocompletion({
-          override: [verilogCompletion],
-          activateOnTyping: true,
-          maxRenderedOptions: 20,
-        }),
 
         keymap.of([
           ...defaultKeymap,
@@ -133,6 +146,14 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange }, ref) {
     // Only run once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Swap the language extension bundle (syntax, lint, autocomplete) whenever
+  // the language prop flips between 'verilog' and 'python'.
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: langCompartment.reconfigure(langExtensions(language)) })
+  }, [language])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync external value prop into the editor when it changes
   useEffect(() => {

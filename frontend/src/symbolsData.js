@@ -37,6 +37,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = a & b;`,
+      python_snippet: `m.d.comb += y.eq(a & b)`,
       truthTable: { headers: ['A','B','Y'], rows: [['0','0','0'],['0','1','0'],['1','0','0'],['1','1','1']] },
     },
     {
@@ -51,6 +52,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = a | b;`,
+      python_snippet: `m.d.comb += y.eq(a | b)`,
       truthTable: { headers: ['A','B','Y'], rows: [['0','0','0'],['0','1','1'],['1','0','1'],['1','1','1']] },
     },
     {
@@ -65,6 +67,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'a', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = ~a;`,
+      python_snippet: `m.d.comb += y.eq(~a)`,
       truthTable: { headers: ['A','Y'], rows: [['0','1'],['1','0']] },
     },
     {
@@ -80,6 +83,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = ~(a & b);`,
+      python_snippet: `m.d.comb += y.eq(~(a & b))`,
       truthTable: { headers: ['A','B','Y'], rows: [['0','0','1'],['0','1','1'],['1','0','1'],['1','1','0']] },
     },
     {
@@ -95,6 +99,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = ~(a | b);`,
+      python_snippet: `m.d.comb += y.eq(~(a | b))`,
       truthTable: { headers: ['A','B','Y'], rows: [['0','0','1'],['0','1','0'],['1','0','0'],['1','1','0']] },
     },
     {
@@ -110,6 +115,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = a ^ b;`,
+      python_snippet: `m.d.comb += y.eq(a ^ b)`,
       truthTable: { headers: ['A','B','Y'], rows: [['0','0','0'],['0','1','1'],['1','0','1'],['1','1','0']] },
     },
     {
@@ -126,6 +132,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = ~(a ^ b);`,
+      python_snippet: `m.d.comb += y.eq(~(a ^ b))`,
       truthTable: { headers: ['A','B','Y'], rows: [['0','0','1'],['0','1','0'],['1','0','0'],['1','1','1']] },
     },
     {
@@ -139,6 +146,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'a', c)}${lbl(107, 52, 'y', c)}
       </svg>`,
       verilog: `assign y = a;`,
+      python_snippet: `m.d.comb += y.eq(a)`,
       truthTable: { headers: ['A','Y'], rows: [['0','0'],['1','1']] },
     },
     {
@@ -153,6 +161,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'a', c)}${lbl(107, 52, 'y', c)}${lbl(55, 14, 'en', c)}
       </svg>`,
       verilog: `assign y = en ? a : 1'bz;`,
+      python_snippet: `m.d.comb += y.eq(Mux(en, a, 0))  # Amaranth lacks 1'bz; gate via en`,
       truthTable: { headers: ['EN','A','Y'], rows: [['0','X','Z'],['1','0','0'],['1','1','1']] },
     },
   ],
@@ -171,6 +180,7 @@ export const SYMBOLS = {
         ${lbl(2, 33, 'in0', c)}${lbl(2, 63, 'in1', c)}${lbl(107, 52, 'out', c)}${lbl(58, 97, 'sel', c)}
       </svg>`,
       verilog: `assign out = sel ? in1 : in0;`,
+      python_snippet: `m.d.comb += out.eq(Mux(sel, in1, in0))`,
       truthTable: { headers: ['S','Y'], rows: [['0','I0'],['1','I1']] },
     },
     {
@@ -189,6 +199,7 @@ export const SYMBOLS = {
         ${lbl(107, 52, 'out', c)}${lbl(53, 100, 'sel', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case (sel)\n    2'b00: out = in0;\n    2'b01: out = in1;\n    2'b10: out = in2;\n    2'b11: out = in3;\n    default: out = 0;\n  endcase\nend`,
+      python_snippet: `with m.Switch(sel):\n  with m.Case(0): m.d.comb += out.eq(in0)\n  with m.Case(1): m.d.comb += out.eq(in1)\n  with m.Case(2): m.d.comb += out.eq(in2)\n  with m.Case(3): m.d.comb += out.eq(in3)`,
       truthTable: { headers: ['S1','S0','Y'], rows: [['0','0','I0'],['0','1','I1'],['1','0','I2'],['1','1','I3']] },
     },
     {
@@ -203,6 +214,7 @@ export const SYMBOLS = {
         ${lbl(50, 50, '8:1', c, 'middle', '10')}${lbl(107, 52, 'out', c)}${lbl(53, 104, 'sel', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case (sel)\n    3'd0: out = in0;\n    3'd1: out = in1;\n    3'd2: out = in2;\n    3'd3: out = in3;\n    3'd4: out = in4;\n    3'd5: out = in5;\n    3'd6: out = in6;\n    3'd7: out = in7;\n    default: out = 0;\n  endcase\nend`,
+      python_snippet: `with m.Switch(sel):\n  for i in range(8):\n    with m.Case(i): m.d.comb += out.eq(ins[i])`,
     },
     {
       name: '1:2 DEMUX',
@@ -217,6 +229,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'in', c)}${lbl(107, 33, 'y0', c)}${lbl(107, 63, 'y1', c)}${lbl(58, 97, 'sel', c)}
       </svg>`,
       verilog: `assign y0 = sel ? 1'b0 : in;\nassign y1 = sel ? in : 1'b0;`,
+      python_snippet: `m.d.comb += y0.eq(Mux(sel, 0, in_))\nm.d.comb += y1.eq(Mux(sel, in_, 0))`,
     },
     {
       name: '1:4 DEMUX',
@@ -233,6 +246,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'in', c)}${lbl(55, 50, '1:4', c, 'middle', '9')}${lbl(58, 100, 'sel', c)}
       </svg>`,
       verilog: `always @(*) begin\n  {y3, y2, y1, y0} = 4'b0000;\n  case (sel)\n    2'b00: y0 = in;\n    2'b01: y1 = in;\n    2'b10: y2 = in;\n    2'b11: y3 = in;\n  endcase\nend`,
+      python_snippet: `with m.Switch(sel):\n  with m.Case(0): m.d.comb += y0.eq(in_)\n  with m.Case(1): m.d.comb += y1.eq(in_)\n  with m.Case(2): m.d.comb += y2.eq(in_)\n  with m.Case(3): m.d.comb += y3.eq(in_)`,
     },
   ],
 
@@ -250,6 +264,7 @@ export const SYMBOLS = {
         ${lbl(2, 28, 'a', c)}${lbl(2, 68, 'b', c)}${lbl(112, 52, 'y', c)}${lbl(43, 5, 'op', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case (op)\n    2'b00: y = a + b;\n    2'b01: y = a - b;\n    2'b10: y = a & b;\n    2'b11: y = a | b;\n    default: y = 0;\n  endcase\nend`,
+      python_snippet: `with m.Switch(op):\n  with m.Case(0): m.d.comb += y.eq(a + b)\n  with m.Case(1): m.d.comb += y.eq(a - b)\n  with m.Case(2): m.d.comb += y.eq(a & b)\n  with m.Case(3): m.d.comb += y.eq(a | b)`,
     },
     {
       name: 'Full Adder',
@@ -266,6 +281,7 @@ export const SYMBOLS = {
         ${lbl(2, 33, 'a', c)}${lbl(2, 48, 'b', c)}${lbl(2, 63, 'cin', c)}${lbl(112, 38, 'sum', c)}${lbl(112, 58, 'cout', c)}
       </svg>`,
       verilog: `assign {cout, sum} = a + b + cin;`,
+      python_snippet: `m.d.comb += Cat(sum_, cout).eq(a + b + cin)`,
       truthTable: { headers: ['A','B','Cin','S','Cout'], rows: [['0','0','0','0','0'],['0','0','1','1','0'],['0','1','0','1','0'],['0','1','1','0','1'],['1','0','0','1','0'],['1','0','1','0','1'],['1','1','0','0','1'],['1','1','1','1','1']] },
     },
     {
@@ -282,6 +298,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'a', c)}${lbl(2, 58, 'b', c)}${lbl(112, 38, 'sum', c)}${lbl(112, 58, 'cout', c)}
       </svg>`,
       verilog: `assign sum = a ^ b;\nassign cout = a & b;`,
+      python_snippet: `m.d.comb += sum_.eq(a ^ b)\nm.d.comb += cout.eq(a & b)`,
       truthTable: { headers: ['A','B','S','Cout'], rows: [['0','0','0','0'],['0','1','1','0'],['1','0','1','0'],['1','1','0','1']] },
     },
     {
@@ -299,6 +316,7 @@ export const SYMBOLS = {
         ${lbl(2, 33, 'a', c)}${lbl(2, 63, 'b', c)}${lbl(112, 28, 'gt', c)}${lbl(112, 48, 'eq', c)}${lbl(112, 68, 'lt', c)}
       </svg>`,
       verilog: `assign gt = (a > b);\nassign eq = (a == b);\nassign lt = (a < b);`,
+      python_snippet: `m.d.comb += gt.eq(a > b)\nm.d.comb += eq_.eq(a == b)\nm.d.comb += lt.eq(a < b)`,
       truthTable: { headers: ['A vs B','gt','eq','lt'], rows: [['A>B','1','0','0'],['A=B','0','1','0'],['A<B','0','0','1']] },
     },
     {
@@ -314,6 +332,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'in', c)}${lbl(112, 52, 'out', c)}${lbl(58, 7, 'shamt', c)}
       </svg>`,
       verilog: `assign out = left ? (in << shamt) : (in >> shamt);`,
+      python_snippet: `m.d.comb += out.eq(Mux(left, in_ << shamt, in_ >> shamt))`,
     },
   ],
 
@@ -331,6 +350,7 @@ export const SYMBOLS = {
         ${lbl(28, 38, 'D', c)}${lbl(80, 38, 'Q', c, 'end')}${lbl(2, 33, 'd', c)}${lbl(2, 78, 'clk', c)}${lbl(112, 38, 'q', c)}
       </svg>`,
       verilog: `always @(posedge clk)\n  q <= d;`,
+      python_snippet: `m.d.sync += q.eq(d)`,
       truthTable: { headers: ['CLK','D','Q(next)'], rows: [['↑','0','0'],['↑','1','1'],['0','X','Q']] },
     },
     {
@@ -348,6 +368,7 @@ export const SYMBOLS = {
         ${lbl(2, 28, 'j', c)}${lbl(2, 48, 'k', c)}${lbl(2, 78, 'clk', c)}${lbl(112, 38, 'q', c)}
       </svg>`,
       verilog: `always @(posedge clk) begin\n  case ({j, k})\n    2'b00: q <= q;\n    2'b01: q <= 1'b0;\n    2'b10: q <= 1'b1;\n    2'b11: q <= ~q;\n  endcase\nend`,
+      python_snippet: `with m.Switch(Cat(k, j)):\n  with m.Case(0b00): m.d.sync += q.eq(q)\n  with m.Case(0b01): m.d.sync += q.eq(0)\n  with m.Case(0b10): m.d.sync += q.eq(1)\n  with m.Case(0b11): m.d.sync += q.eq(~q)`,
       truthTable: { headers: ['J','K','Q(next)'], rows: [['0','0','Q'],['0','1','0'],['1','0','1'],['1','1','~Q']] },
     },
     {
@@ -363,6 +384,7 @@ export const SYMBOLS = {
         ${lbl(28, 38, 'T', c)}${lbl(80, 38, 'Q', c, 'end')}${lbl(2, 33, 't', c)}${lbl(2, 78, 'clk', c)}${lbl(112, 38, 'q', c)}
       </svg>`,
       verilog: `always @(posedge clk)\n  if (t) q <= ~q;`,
+      python_snippet: `with m.If(t): m.d.sync += q.eq(~q)`,
       truthTable: { headers: ['T','Q(next)'], rows: [['0','Q'],['1','~Q']] },
     },
     {
@@ -378,6 +400,7 @@ export const SYMBOLS = {
         ${lbl(2, 33, 's', c)}${lbl(2, 63, 'r', c)}${lbl(112, 52, 'q', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case ({s, r})\n    2'b10: q = 1'b1;\n    2'b01: q = 1'b0;\n    2'b00: q = q;\n    default: q = 1'bx;\n  endcase\nend`,
+      python_snippet: `with m.If(s): m.d.comb += q.eq(1)\nwith m.Elif(r): m.d.comb += q.eq(0)`,
       truthTable: { headers: ['S','R','Q(next)'], rows: [['0','0','Q'],['0','1','0'],['1','0','1'],['1','1','?']] },
     },
   ],
@@ -397,6 +420,7 @@ export const SYMBOLS = {
         ${lbl(2, 38, 'din', c)}${lbl(2, 73, 'clk', c)}${lbl(112, 52, 'dout', c)}
       </svg>`,
       verilog: `reg [7:0] data;\nalways @(posedge clk)\n  if (en) data <= din;`,
+      python_snippet: `with m.If(en): m.d.sync += data.eq(din)`,
     },
     {
       name: 'RAM',
@@ -413,6 +437,7 @@ export const SYMBOLS = {
         ${lbl(2, 23, 'addr', c)}${lbl(2, 43, 'din', c)}${lbl(2, 63, 'we', c)}${lbl(2, 78, 'clk', c)}${lbl(112, 52, 'dout', c)}
       </svg>`,
       verilog: `reg [7:0] mem [0:255];\nalways @(posedge clk)\n  if (we) mem[addr] <= din;\nassign dout = mem[addr];`,
+      python_snippet: `mem = Memory(width=8, depth=256)\nm.submodules.mem = mem\nrp = mem.read_port(); wp = mem.write_port()\nm.d.comb += [rp.addr.eq(addr), wp.addr.eq(addr), wp.data.eq(din), wp.en.eq(we), dout.eq(rp.data)]`,
     },
     {
       name: 'ROM',
@@ -426,6 +451,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'addr', c)}${lbl(112, 52, 'dout', c)}
       </svg>`,
       verilog: `assign dout = rom_data[addr];`,
+      python_snippet: `rom = Memory(width=8, depth=16, init=ROM_INIT)\nm.submodules.rom = rom\nrp = rom.read_port()\nm.d.comb += [rp.addr.eq(addr), dout.eq(rp.data)]`,
     },
     {
       name: 'Reg File',
@@ -446,6 +472,7 @@ export const SYMBOLS = {
         ${lbl(112, 33, 'rd1', c)}${lbl(112, 63, 'rd2', c)}
       </svg>`,
       verilog: `reg [31:0] regs [0:31];\nalways @(posedge clk)\n  if (we) regs[wa] <= wd;\nassign rd1 = regs[ra1];\nassign rd2 = regs[ra2];`,
+      python_snippet: `regs = Memory(width=32, depth=32)\nm.submodules.regs = regs\nwp = regs.write_port(); rp1 = regs.read_port(); rp2 = regs.read_port()\nm.d.comb += [wp.addr.eq(wa), wp.data.eq(wd), wp.en.eq(we), rp1.addr.eq(ra1), rd1.eq(rp1.data), rp2.addr.eq(ra2), rd2.eq(rp2.data)]`,
     },
   ],
 
@@ -463,6 +490,7 @@ export const SYMBOLS = {
         ${lbl(2, 73, 'clk', c)}${lbl(112, 52, 'pc', c)}
       </svg>`,
       verilog: `always @(posedge clk)\n  if (rst) pc <= 0;\n  else pc <= pc + 4;`,
+      python_snippet: `with m.If(rst): m.d.sync += pc.eq(0)\nwith m.Else(): m.d.sync += pc.eq(pc + 4)`,
     },
     {
       name: 'Control Unit',
@@ -478,6 +506,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'op', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case (opcode)\n    // decode control signals\n    default: ctrl = 0;\n  endcase\nend`,
+      python_snippet: `with m.Switch(opcode):\n  # Decode per-opcode control signals\n  with m.Default(): m.d.comb += ctrl.eq(0)`,
     },
     {
       name: 'Instr Mem',
@@ -491,6 +520,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, 'pc', c)}${lbl(112, 52, 'instr', c)}
       </svg>`,
       verilog: `assign instr = imem[pc[9:2]];`,
+      python_snippet: `mem = Memory(width=32, depth=1024, init=IMEM_INIT)\nm.submodules.imem = mem\nrp = mem.read_port()\nm.d.comb += [rp.addr.eq(pc[2:]), instr.eq(rp.data)]`,
     },
     {
       name: 'Data Mem',
@@ -506,6 +536,7 @@ export const SYMBOLS = {
         ${lbl(2, 28, 'addr', c)}${lbl(2, 48, 'wdata', c)}${lbl(2, 68, 'we', c)}${lbl(112, 52, 'rdata', c)}
       </svg>`,
       verilog: `always @(posedge clk)\n  if (memwrite) dmem[addr] <= wdata;\nassign rdata = dmem[addr];`,
+      python_snippet: `mem = Memory(width=32, depth=1024)\nm.submodules.dmem = mem\nwp = mem.write_port(); rp = mem.read_port()\nm.d.comb += [wp.addr.eq(addr), wp.data.eq(wdata), wp.en.eq(memwrite), rp.addr.eq(addr), rdata.eq(rp.data)]`,
     },
     {
       name: 'Sign Extend',
@@ -519,6 +550,7 @@ export const SYMBOLS = {
         ${lbl(2, 48, '16b', c)}${lbl(112, 52, '32b', c)}
       </svg>`,
       verilog: `assign out = {{16{in[15]}}, in};`,
+      python_snippet: `m.d.comb += out.eq(in_.as_signed())  # 16-to-32 sign extension`,
     },
     {
       name: 'Clock Gen',
@@ -531,6 +563,7 @@ export const SYMBOLS = {
         ${lbl(112, 52, 'clk', c)}
       </svg>`,
       verilog: `always #5 clk = ~clk;`,
+      python_snippet: `# In Amaranth, clk is provided by the surrounding ClockDomain.\n# To divide: m.d.sync += cnt.eq(cnt + 1); m.d.comb += clk_div.eq(cnt[-1])`,
     },
   ],
 
@@ -563,6 +596,7 @@ export const SYMBOLS = {
         ${lbl(127, 30, 'y', c, 'start', '7')}
       </svg>`,
       verilog: `genvar i;\ngenerate for (i=0; i<4; i=i+1) begin: lane\n  always @(*) case (op)\n    2'b00: y[i] = a[i] + b[i];\n    2'b01: y[i] = a[i] - b[i];\n    2'b10: y[i] = a[i] & b[i];\n    2'b11: y[i] = a[i] | b[i];\n  endcase\nend endgenerate`,
+      python_snippet: `for i in range(4):\n  with m.Switch(op):\n    with m.Case(0): m.d.comb += y[i].eq(a[i] + b[i])\n    with m.Case(1): m.d.comb += y[i].eq(a[i] - b[i])\n    with m.Case(2): m.d.comb += y[i].eq(a[i] & b[i])\n    with m.Case(3): m.d.comb += y[i].eq(a[i] | b[i])`,
       truthTable: null,
     },
     {
@@ -592,6 +626,7 @@ export const SYMBOLS = {
         </svg>`
       },
       verilog: `genvar r, k;\ngenerate for (r=0; r<4; r=r+1) begin: row\n  for (k=0; k<4; k=k+1) begin: col\n    always @(posedge clk)\n      if (rst) acc[r][k] <= 0;\n      else     acc[r][k] <= acc[r][k] + a[r] * b[k];\n  end\nend endgenerate`,
+      python_snippet: `for r in range(4):\n  for k in range(4):\n    with m.If(rst): m.d.sync += acc[r][k].eq(0)\n    with m.Else():  m.d.sync += acc[r][k].eq(acc[r][k] + a[r] * b[k])`,
       truthTable: null,
     },
     {
@@ -619,6 +654,7 @@ export const SYMBOLS = {
         ${lbl(117, 27, 'o0', c, 'start', '7')}
       </svg>`,
       verilog: `always @(*) begin\n  out0 = in[sel0];\n  out1 = in[sel1];\n  out2 = in[sel2];\n  out3 = in[sel3];\nend`,
+      python_snippet: `m.d.comb += out0.eq(ins[sel0])\nm.d.comb += out1.eq(ins[sel1])\nm.d.comb += out2.eq(ins[sel2])\nm.d.comb += out3.eq(ins[sel3])`,
       truthTable: null,
     },
     {
@@ -641,6 +677,7 @@ export const SYMBOLS = {
         ${lbl(60, 9, 'PIPE', c, 'middle', '8')}
       </svg>`,
       verilog: `always @(posedge clk)\n  if (en) data_out <= data_in;`,
+      python_snippet: `with m.If(en): m.d.sync += data_out.eq(data_in)`,
       truthTable: null,
     },
     {
@@ -667,6 +704,7 @@ export const SYMBOLS = {
         ${lbl(117, 52, 'rdata', c, 'start', '7')}
       </svg>`,
       verilog: `reg [31:0] mem [0:255];\nalways @(posedge clk)\n  if (we) mem[waddr] <= wdata;\nassign rdata = mem[raddr];`,
+      python_snippet: `mem = Memory(width=32, depth=256)\nm.submodules.smem = mem\nwp = mem.write_port(); rp = mem.read_port()\nm.d.comb += [wp.addr.eq(waddr), wp.data.eq(wdata), wp.en.eq(we), rp.addr.eq(raddr), rdata.eq(rp.data)]`,
       truthTable: null,
     },
     {
@@ -690,6 +728,7 @@ export const SYMBOLS = {
         ${lbl(117, 52, 'active', c, 'start', '7')}
       </svg>`,
       verilog: `always @(posedge clk)\n  if (rst) curr <= 0;\n  else     curr <= curr + 1;\nassign active_warp = curr;`,
+      python_snippet: `with m.If(rst): m.d.sync += curr.eq(0)\nwith m.Else(): m.d.sync += curr.eq(curr + 1)\nm.d.comb += active_warp.eq(curr)`,
       truthTable: null,
     },
     {
@@ -708,6 +747,7 @@ export const SYMBOLS = {
         ${lbl(117, 52, 'pass', c, 'start', '7')}
       </svg>`,
       verilog: `assign pass = (z_new < z_old);\nassign z_out = pass ? z_new : z_old;`,
+      python_snippet: `m.d.comb += pass_.eq(z_new < z_old)\nm.d.comb += z_out.eq(Mux(z_new < z_old, z_new, z_old))`,
       truthTable: null,
     },
     {
@@ -736,6 +776,7 @@ export const SYMBOLS = {
         ${lbl(117, 67, 'rd2', c, 'start', '7')}
       </svg>`,
       verilog: `reg [127:0] vregs [0:31];\nalways @(posedge clk)\n  if (we) vregs[wa] <= wdata;\nassign rd1 = vregs[ra1];\nassign rd2 = vregs[ra2];`,
+      python_snippet: `vregs = Memory(width=128, depth=32)\nm.submodules.vregs = vregs\nwp = vregs.write_port(); rp1 = vregs.read_port(); rp2 = vregs.read_port()\nm.d.comb += [wp.addr.eq(wa), wp.data.eq(wdata), wp.en.eq(we), rp1.addr.eq(ra1), rd1.eq(rp1.data), rp2.addr.eq(ra2), rd2.eq(rp2.data)]`,
       truthTable: null,
     },
   ],
@@ -756,6 +797,7 @@ export const SYMBOLS = {
         ${lbl(107, 23, 'y0', c)}${lbl(107, 40, 'y1', c)}${lbl(107, 56, 'y2', c)}${lbl(107, 73, 'y3', c)}
       </svg>`,
       verilog: `always @(*) begin\n  case (a)\n    2'b00: y = 4'b0001;\n    2'b01: y = 4'b0010;\n    2'b10: y = 4'b0100;\n    2'b11: y = 4'b1000;\n    default: y = 4'b0000;\n  endcase\nend`,
+      python_snippet: `with m.Switch(a):\n  with m.Case(0): m.d.comb += y.eq(0b0001)\n  with m.Case(1): m.d.comb += y.eq(0b0010)\n  with m.Case(2): m.d.comb += y.eq(0b0100)\n  with m.Case(3): m.d.comb += y.eq(0b1000)`,
       truthTable: { headers: ['A1','A0','Y3','Y2','Y1','Y0'], rows: [['0','0','0','0','0','1'],['0','1','0','0','1','0'],['1','0','0','1','0','0'],['1','1','1','0','0','0']] },
     },
     {
@@ -773,6 +815,7 @@ export const SYMBOLS = {
         ${lbl(107, 52, 'y[1:0]', c)}
       </svg>`,
       verilog: `always @(*) begin\n  casez (in)\n    4'b1???: y = 2'd3;\n    4'b01??: y = 2'd2;\n    4'b001?: y = 2'd1;\n    4'b0001: y = 2'd0;\n    default: y = 2'd0;\n  endcase\nend`,
+      python_snippet: `with m.If(in_[3]):   m.d.comb += y.eq(3)\nwith m.Elif(in_[2]): m.d.comb += y.eq(2)\nwith m.Elif(in_[1]): m.d.comb += y.eq(1)\nwith m.Else():       m.d.comb += y.eq(0)`,
     },
   ],
 }

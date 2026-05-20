@@ -49,6 +49,12 @@ app.add_middleware(
 class SimulateRequest(BaseModel):
     design: str
     testbench: str
+    language: str = "verilog"
+    # When language='python', the frontend may pass the verilog_intermediate
+    # captured at generation time so we don't have to re-elaborate Amaranth
+    # on every simulate. If empty, we re-elaborate from `design` (which is
+    # the Amaranth source).
+    verilog_intermediate: str = ""
 
 
 class VCDSignal(BaseModel):
@@ -194,14 +200,206 @@ def parse_vcd(vcd_text: str) -> dict:
 # Simulate endpoint
 # ---------------------------------------------------------------------------
 
+def _extract_toplevel_name(verilog: str) -> str:
+    """Pull the first ``module <name>`` from elaborated Verilog. Amaranth
+    emits a top module called ``top`` by default, but we still parse so a
+    user-edited Verilog intermediate still works."""
+    m = re.search(r"\bmodule\s+\\?([A-Za-z_][A-Za-z0-9_]*)", verilog)
+    return m.group(1) if m else "top"
+
+
+async def _simulate_python(req: SimulateRequest) -> SimulateResponse:
+    """Cocotb runner path for Python (Amaranth + Cocotb) mode."""
+
+    # Step 1: get the Verilog intermediate. Prefer the captured one from
+    # /generate so we don't repeat the LLM-free elaborate. If absent,
+    # re-elaborate the Amaranth source.
+    verilog_src = (req.verilog_intermediate or "").strip()
+    if not verilog_src:
+        # Lazy import keeps the Amaranth dependency out of the Verilog hot path
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
+        from amaranth_generator import _elaborate, AmaranthElaborationError
+        try:
+            verilog_src = _elaborate(req.design)
+        except AmaranthElaborationError as e:
+            return SimulateResponse(
+                success=False,
+                signals=[],
+                timescale="1ns",
+                end_time=0,
+                stdout="",
+                stderr=(
+                    "Amaranth elaboration failed — cannot simulate.\n"
+                    f"{e}\n\n"
+                    "Click GENERATE again, or fix the Amaranth source."
+                ),
+            )
+
+    toplevel = _extract_toplevel_name(verilog_src)
+    test_module = "test_design_volta"
+
+    try:
+        from cocotb_tools.runner import get_runner
+    except ImportError:
+        return SimulateResponse(
+            success=False, signals=[], timescale="1ns", end_time=0, stdout="",
+            stderr="cocotb is not installed in the backend Python env. Run: pip install cocotb>=1.9.0",
+        )
+
+    with tempfile.TemporaryDirectory(prefix="volta_pysim_") as work_dir:
+        verilog_path = os.path.join(work_dir, "design.v")
+        test_path = os.path.join(work_dir, f"{test_module}.py")
+        with open(verilog_path, "w") as f:
+            f.write(verilog_src)
+        with open(test_path, "w") as f:
+            f.write(req.testbench)
+
+        build_dir = os.path.join(work_dir, "sim_build")
+        log_file = os.path.join(work_dir, "cocotb.log")
+        runner = get_runner("icarus")
+
+        # iverilog defaults to a coarse simulator precision (1s) which makes
+        # `Timer(1, units="ns")` round to zero and the tests instantly fail.
+        # Setting an explicit timescale fixes it.
+        timescale = ("1ns", "1ps")
+        results_xml: Optional[str] = None
+        sim_error: Optional[str] = None
+        try:
+            runner.build(
+                verilog_sources=[verilog_path],
+                hdl_toplevel=toplevel,
+                build_dir=build_dir,
+                waves=True,
+                clean=True,
+                timescale=timescale,
+                log_file=log_file,
+            )
+            # test_dir adds the dir to sys.path for the cocotb subprocess —
+            # extra_env={'PYTHONPATH': ...} did not work reliably under
+            # tempfile.TemporaryDirectory paths.
+            results_xml = str(runner.test(
+                test_module=test_module,
+                hdl_toplevel=toplevel,
+                hdl_toplevel_lang="verilog",
+                build_dir=build_dir,
+                test_dir=work_dir,
+                waves=True,
+                timescale=timescale,
+                log_file=log_file,
+            ))
+        except SystemExit:
+            pass  # cocotb-runner exits on hard sim failures
+        except Exception as e:
+            sim_error = f"cocotb runner raised: {e}"
+
+        # Capture the log cocotb wrote to disk — its stdout/stderr go to OS
+        # file descriptors that Python's redirect_stdout cannot intercept.
+        log_text = ""
+        if os.path.exists(log_file):
+            try:
+                with open(log_file) as f:
+                    log_text = f.read()
+            except Exception:
+                pass
+
+        stdout_text = log_text
+        stderr_text = sim_error or ""
+
+        # Parse results.xml for per-test PASS/FAIL summary
+        summary_lines: list[str] = []
+        total = passed = failed = 0
+        try:
+            import xml.etree.ElementTree as ET
+            # cocotb-runner returns the absolute path; fall back to the
+            # conventional locations.
+            candidates = []
+            if results_xml:
+                candidates.append(results_xml)
+            candidates.extend([
+                os.path.join(work_dir, "results.xml"),
+                os.path.join(build_dir, "results.xml"),
+            ])
+            for res_path in candidates:
+                if res_path and os.path.exists(res_path):
+                    tree = ET.parse(res_path)
+                    for case in tree.iter("testcase"):
+                        total += 1
+                        name = case.get("name", "?")
+                        fail = case.find("failure") is not None or case.find("error") is not None
+                        if fail:
+                            failed += 1
+                            summary_lines.append(f"  ✗ {name}")
+                        else:
+                            passed += 1
+                            summary_lines.append(f"  ✓ {name}")
+                    summary_lines.insert(
+                        0,
+                        f"[COCOTB] {passed}/{total} tests passed ({failed} failed)",
+                    )
+                    break
+        except Exception as e:
+            summary_lines.append(f"(could not parse results.xml: {e})")
+
+        # Try to read a VCD if cocotb produced one. With Icarus + waves=True
+        # cocotb writes an FST file (top.fst) which the existing parse_vcd()
+        # cannot read. We try VCD candidates first; if none exist, attempt
+        # fst2vcd (from iverilog's tools) to convert. This is best-effort so
+        # the WaveformViewer may be empty in Python mode even when tests pass.
+        vcd_data = {"timescale": "1ns", "end_time": 0, "signals": []}
+        vcd_candidates = [
+            os.path.join(build_dir, "dump.vcd"),
+            os.path.join(work_dir, "dump.vcd"),
+        ]
+        fst_path = os.path.join(build_dir, f"{toplevel}.fst")
+        if os.path.exists(fst_path):
+            converted = os.path.join(build_dir, "from_fst.vcd")
+            try:
+                subprocess.run(
+                    ["fst2vcd", "-o", converted, fst_path],
+                    capture_output=True, text=True, timeout=15,
+                )
+                if os.path.exists(converted):
+                    vcd_candidates.insert(0, converted)
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                pass  # fst2vcd not available — leave waveforms empty
+        for candidate in vcd_candidates:
+            if os.path.exists(candidate):
+                try:
+                    with open(candidate) as f:
+                        vcd_data = parse_vcd(f.read())
+                except Exception:
+                    pass
+                break
+
+        success = (total > 0 and failed == 0)
+
+        return SimulateResponse(
+            success=success,
+            signals=[VCDSignal(**s) for s in vcd_data["signals"]],
+            timescale=vcd_data["timescale"],
+            end_time=vcd_data["end_time"],
+            stdout=("\n".join(summary_lines) + "\n\n" + stdout_text).strip(),
+            stderr=stderr_text,
+        )
+
+
 @app.post("/simulate", response_model=SimulateResponse)
 async def simulate(req: SimulateRequest):
-    """Compile design + testbench with iverilog, simulate with vvp, return VCD as JSON."""
+    """Compile design + testbench with iverilog, simulate with vvp, return VCD as JSON.
+
+    In Python mode (``language='python'``) the design is Amaranth and the
+    testbench is Cocotb. We elaborate the Amaranth to Verilog (using the
+    supplied ``verilog_intermediate`` if present, otherwise re-running the
+    Amaranth subprocess), then dispatch to cocotb_tools.runner with sim=icarus.
+    """
 
     if not req.design.strip():
         raise HTTPException(status_code=400, detail="Design code is empty")
     if not req.testbench.strip():
         raise HTTPException(status_code=400, detail="Testbench code is empty")
+
+    if (req.language or "verilog").lower() == "python":
+        return await _simulate_python(req)
 
     with tempfile.TemporaryDirectory(prefix="volta_sim_") as work_dir:
         design_path = os.path.join(work_dir, "design.v")
@@ -260,6 +458,7 @@ async def simulate(req: SimulateRequest):
 
 class GenerateRequest(BaseModel):
     prompt: str
+    language: str = "verilog"  # "verilog" (default) or "python" (Amaranth + Cocotb)
 
 
 class CorrectionInfo(BaseModel):
@@ -282,6 +481,13 @@ class GenerateResponse(BaseModel):
     testbench: str
     correction: Optional[CorrectionInfo] = None
     logic_issues: list[LogicIssue] = []
+    # Python mode additions — present only when language='python'. The
+    # frontend uses design/testbench for the visible editors; the verilog
+    # intermediate is what the Schematic/Diagram/Simulate paths consume.
+    design_language: str = "verilog"
+    testbench_language: str = "verilog"
+    verilog_intermediate: str = ""
+    python_warnings: list[str] = []
 
 
 @app.post("/generate", response_model=GenerateResponse)
@@ -299,8 +505,14 @@ async def generate(req: GenerateRequest):
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is empty")
 
+    language = (req.language or "verilog").lower()
+
     try:
-        result = orchestrator_generate(req.prompt)
+        if language == "python":
+            from orchestrator import generate_python  # lazy: avoid cold start cost in Verilog-only runs
+            result = generate_python(req.prompt)
+        else:
+            result = orchestrator_generate(req.prompt)
     except RuntimeError as e:
         raise HTTPException(
             status_code=502,
@@ -330,6 +542,10 @@ async def generate(req: GenerateRequest):
         testbench=result["testbench"],
         correction=correction,
         logic_issues=issues,
+        design_language=result.get("design_language", "verilog"),
+        testbench_language=result.get("testbench_language", "verilog"),
+        verilog_intermediate=result.get("verilog_intermediate", ""),
+        python_warnings=result.get("python_warnings", []) or [],
     )
 
 
@@ -803,12 +1019,29 @@ class LogicIssueData(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+    language: str = "verilog"  # "verilog" or "python"
     design: str = ""
     testbench: str = ""
     history: list[ChatMessage] = []
     simulation: Optional[SimulationData] = None
     selectedSymbols: list[SelectedSymbolData] = []
     logicIssues: list[LogicIssueData] = []
+
+
+# Prepended to the chat system prompt when the user is in Python mode. The
+# rest of the prompt continues to focus on HDL correctness — this just orients
+# the assistant on which idioms to use when quoting code.
+PYTHON_SYSTEM_PROMPT_PREFIX = """The user is working in Python mode. The design \
+is written in Amaranth HDL (https://amaranth-lang.org). The testbench is \
+written in Cocotb. When referencing code, use Python/Amaranth idioms — \
+`m.d.comb += signal.eq(expr)` for combinational, `m.d.sync += signal.eq(expr)` \
+for sequential, `Signal()` for ports, `Mux(sel, a, b)`, `with m.If(...)`, \
+`with m.Switch(...) / m.Case(...)`. The Verilog you see internally is \
+auto-generated from Amaranth by Yosys and SHOULD NOT be edited directly — \
+edits won't survive the next elaborate. The validation rules (sequential \
+needs clock, ALU needs operands, etc.) still apply identically.
+
+"""
 
 
 class ChatResponse(BaseModel):
@@ -1007,7 +1240,10 @@ async def chat(req: ChatRequest):
     max_tokens = 300 if wants_short else 800
 
     # Build context with current design code
-    context_parts = [CHAT_SYSTEM_PROMPT]
+    context_parts = []
+    if (req.language or "verilog").lower() == "python":
+        context_parts.append(PYTHON_SYSTEM_PROMPT_PREFIX)
+    context_parts.append(CHAT_SYSTEM_PROMPT)
     if req.design.strip():
         context_parts.append(f"\nCurrent Verilog design:\n```verilog\n{req.design}\n```")
     if req.testbench.strip():
@@ -2264,6 +2500,10 @@ async def synthesize(req: SynthesizeRequest):
 class ValidateSelectionRequest(BaseModel):
     symbolIds: list[str] = []
     prompt: str = ""
+    # language is accepted for API symmetry but compute_verdict() is
+    # language-agnostic — the verdict is the same whether the design is
+    # written in Verilog or Amaranth.
+    language: str = "verilog"
 
 
 class ValidateSelectionResponse(BaseModel):

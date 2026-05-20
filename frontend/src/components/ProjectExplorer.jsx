@@ -14,7 +14,13 @@ export default function ProjectExplorer({
   activeEditorTab = 'DESIGN.V',
   onSelectDesign,
   onSelectTestbench,
+  language = 'verilog',
 }) {
+  const ext = language === 'python' ? 'py' : 'v'
+  const designLabel = `design.${ext}`
+  const tbLabel = language === 'python'
+    ? `test_${moduleName}.py`
+    : `tb_${moduleName}.v`
   const [collapsed, setCollapsed] = useState(false)
   const [srcOpen, setSrcOpen] = useState(true)
   const [simOpen, setSimOpen] = useState(true)
@@ -105,13 +111,13 @@ export default function ProjectExplorer({
                 active={activeEditorTab === 'DESIGN.V'}
                 onClick={onSelectDesign}
                 dotColor={designDot}
-                label="design.v"
+                label={designLabel}
               />
               <FileNode
                 active={activeEditorTab === 'TB_DESIGN.V'}
                 onClick={onSelectTestbench}
                 dotColor={tbDot}
-                label={`tb_${moduleName}.v`}
+                label={tbLabel}
               />
             </>
           )}
@@ -137,7 +143,7 @@ export default function ProjectExplorer({
               <FileNode
                 active={false}
                 dotColor={simDot}
-                label="design.v"
+                label={designLabel}
                 disabled
               />
               <FileNode
