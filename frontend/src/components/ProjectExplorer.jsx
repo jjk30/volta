@@ -16,11 +16,13 @@ export default function ProjectExplorer({
   onSelectTestbench,
   language = 'verilog',
 }) {
-  const ext = language === 'python' ? 'py' : 'v'
+  const ext = language === 'python' ? 'py'
+            : language === 'systemverilog' ? 'sv'
+            : 'v'
   const designLabel = `design.${ext}`
   const tbLabel = language === 'python'
     ? `test_${moduleName}.py`
-    : `tb_${moduleName}.v`
+    : `tb_${moduleName}.${ext}`
   const [collapsed, setCollapsed] = useState(false)
   const [srcOpen, setSrcOpen] = useState(true)
   const [simOpen, setSimOpen] = useState(true)

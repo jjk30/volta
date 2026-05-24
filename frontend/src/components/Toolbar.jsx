@@ -139,14 +139,25 @@ export default function Toolbar({
 
       {/* Compact inline dropdowns */}
       <select
-        value={language === 'python' ? 'Python' : 'Verilog'}
-        onChange={(e) => setLanguage(e.target.value === 'Python' ? 'python' : 'verilog')}
+        value={
+          language === 'python' ? 'Python'
+          : language === 'systemverilog' ? 'SystemVerilog'
+          : 'Verilog'
+        }
+        onChange={(e) => {
+          const v = e.target.value
+          setLanguage(
+            v === 'Python' ? 'python'
+            : v === 'SystemVerilog' ? 'systemverilog'
+            : 'verilog'
+          )
+        }}
         style={{ ...selectStyle, width: '210px' }}
         title="Source language for the design and testbench"
       >
         <option value="Verilog">Verilog</option>
+        <option value="SystemVerilog">SystemVerilog</option>
         <option value="Python">Python (Amaranth + Cocotb)</option>
-        <option disabled>SystemVerilog</option>
         <option disabled>VHDL</option>
         <option disabled>C++ (SystemC)</option>
       </select>

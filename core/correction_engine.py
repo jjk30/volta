@@ -66,19 +66,26 @@ def classify_errors(errors: list[str]) -> dict[str, list[str]]:
 # Yosys interface
 # ---------------------------------------------------------------------------
 
-def run_yosys(verilog: str) -> SynthesisResult:
-    """Run Yosys read_verilog on a Verilog string. Return a SynthesisResult."""
+def run_yosys(verilog: str, language: str = "verilog") -> SynthesisResult:
+    """Run Yosys ``read_verilog`` on a string. Return a SynthesisResult.
+
+    ``language='systemverilog'`` adds ``-sv`` to ``read_verilog`` so Yosys
+    accepts modern SV constructs.
+    """
 
     if not verilog.strip():
         return SynthesisResult(success=False, errors=["Empty Verilog input"], log="")
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".v", delete=False) as f:
+    is_sv = (language or "verilog").lower() == "systemverilog"
+    suffix = ".sv" if is_sv else ".v"
+    with tempfile.NamedTemporaryFile(mode="w", suffix=suffix, delete=False) as f:
         f.write(verilog)
         path = f.name
 
+    read_cmd = "read_verilog -sv " + path if is_sv else "read_verilog " + path
     try:
         r = subprocess.run(
-            ["yosys", "-p", f"read_verilog {path}; hierarchy -check; proc; opt"],
+            ["yosys", "-p", f"{read_cmd}; hierarchy -check; proc; opt"],
             capture_output=True, text=True, timeout=30,
         )
         full_log = r.stdout + r.stderr

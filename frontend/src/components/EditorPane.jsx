@@ -19,13 +19,31 @@ function readCurrentTheme() {
   return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
 }
 
-// Per-language extension bundle. For Python we use the proper Lezer grammar
-// from @codemirror/lang-python; for Verilog we keep the legacy StreamLanguage
-// mode that was here before. Lint and autocomplete are language-specific too
-// — running the Verilog linter on Python would false-flag every line.
+// Per-language extension bundle.
+//
+//   verilog        — legacy StreamLanguage Verilog mode + Verilog-2005 linter
+//                    + Verilog autocomplete.
+//   systemverilog  — same Verilog StreamLanguage (it tokenizes modern SV
+//                    constructs adequately for highlighting), BUT skip the
+//                    linter: it's Verilog-2005-only and would false-flag
+//                    every `logic`/`always_ff`/`always_comb`. Autocomplete
+//                    stays — its keyword list is mostly a superset.
+//   python         — proper Lezer grammar from @codemirror/lang-python.
+//                    No Verilog linter or completion — they'd false-flag
+//                    Python on every line.
 function langExtensions(language) {
   if (language === 'python') {
     return [python()]
+  }
+  if (language === 'systemverilog') {
+    return [
+      StreamLanguage.define(verilog),
+      autocompletion({
+        override: [verilogCompletion],
+        activateOnTyping: true,
+        maxRenderedOptions: 20,
+      }),
+    ]
   }
   return [
     StreamLanguage.define(verilog),
