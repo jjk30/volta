@@ -11,6 +11,7 @@ import ProjectExplorer from './components/ProjectExplorer.jsx'
 import ContextPanel from './components/ContextPanel.jsx'
 import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { DEFAULT_DESIGN, DEFAULT_TESTBENCH } from './defaults.js'
+import { verilogToSystemverilog, systemverilogToVerilog } from './utils/languageTransforms.js'
 
 const API_URL = 'http://localhost:8000'
 
@@ -171,6 +172,11 @@ function App() {
   // schematic and simulate paths have a stable intermediate without
   // re-elaborating on every interaction.
   const [verilogIntermediate, setVerilogIntermediate] = useState('')
+  // Cached prompt from the most recent successful /generate. Used by
+  // handleLanguageChange to silently regenerate when the user switches TO
+  // Python from another language — Amaranth source can't be machine-derived
+  // from Verilog/SV, so we have to round-trip through the LLM.
+  const [lastPrompt, setLastPrompt] = useState('')
 
   // Target (Icarus | iCE40 FPGA | ECP5 FPGA) drives whether SIM runs a
   // simulation or kicks off Yosys FPGA synthesis.
@@ -278,6 +284,9 @@ function App() {
       // the schematic and simulate paths have a stable intermediate without
       // re-elaborating Amaranth on every interaction.
       setVerilogIntermediate(data.verilog_intermediate || '')
+      // Remember the prompt that produced this design so we can silently
+      // re-call /generate if the user later switches TO Python.
+      setLastPrompt(prompt)
       setGenerateDone(true)
       setTimeout(() => setGenerateDone(false), 3000)
       setChatAutoMessage(`explain-${Date.now()}`)
@@ -291,6 +300,112 @@ function App() {
   }, [language])
 
   const handleCancelGenerate = useCallback(() => { generateControllerRef.current?.abort() }, [])
+
+  /**
+   * Convert the current design + testbench to a new language when the user
+   * changes the dropdown. Five of the six pairs are instant:
+   *
+   *   V  → SV   :  verilogToSystemverilog regex pass
+   *   SV → V   :  systemverilogToVerilog regex pass (wire/reg disambiguation)
+   *   P  → V   :  use cached verilog_intermediate from the last /generate
+   *   P  → SV  :  verilog_intermediate + V→SV pass
+   *   V  → P / SV → P : NO machine derivation — round-trip the cached prompt
+   *                     through /generate (silent, with the existing
+   *                     "generating" spinner).
+   *
+   * Empty buffers and a no-op same-language change are short-circuited.
+   * The handler is also a no-op while another generate is in flight; the
+   * dropdown is disabled in the toolbar so this is mainly defensive.
+   */
+  const handleLanguageChange = useCallback(async (newLanguage) => {
+    const previousLanguage = language
+    if (previousLanguage === newLanguage) return
+    if (generating) return  // dropdown is also disabled — belt + braces
+
+    const hasDesignContent = (design || '').replace(/\/\/.*$/gm, '').trim().length > 0
+    const hasTbContent = (testbench || '').replace(/\/\/.*$/gm, '').trim().length > 0
+
+    // Case 1: Verilog ↔ SystemVerilog (pure regex, instant)
+    if (previousLanguage === 'verilog' && newLanguage === 'systemverilog') {
+      if (hasDesignContent) setDesign(verilogToSystemverilog(design))
+      if (hasTbContent) setTestbench(verilogToSystemverilog(testbench))
+      setLanguage(newLanguage)
+      return
+    }
+    if (previousLanguage === 'systemverilog' && newLanguage === 'verilog') {
+      if (hasDesignContent) setDesign(systemverilogToVerilog(design))
+      if (hasTbContent) setTestbench(systemverilogToVerilog(testbench))
+      setLanguage(newLanguage)
+      return
+    }
+
+    // Case 2: Python → Verilog / SystemVerilog (instant via cached intermediate)
+    if (previousLanguage === 'python' && newLanguage === 'verilog') {
+      if (verilogIntermediate) {
+        setDesign(verilogIntermediate)
+        setTestbench('// Click GENERATE to produce a Verilog testbench')
+      }
+      setLanguage(newLanguage)
+      return
+    }
+    if (previousLanguage === 'python' && newLanguage === 'systemverilog') {
+      if (verilogIntermediate) {
+        setDesign(verilogToSystemverilog(verilogIntermediate))
+        setTestbench('// Click GENERATE to produce a SystemVerilog testbench')
+      }
+      setLanguage(newLanguage)
+      return
+    }
+
+    // Case 3: Verilog / SystemVerilog → Python (needs backend regenerate)
+    if (newLanguage === 'python' && (previousLanguage === 'verilog' || previousLanguage === 'systemverilog')) {
+      // Flip the language first so tabs/labels update immediately.
+      setLanguage(newLanguage)
+      if (!lastPrompt) {
+        // No prior generate to round-trip — leave a hint and bail.
+        setDesign('# Click GENERATE to produce Amaranth code')
+        setTestbench('# Click GENERATE to produce a Cocotb testbench')
+        return
+      }
+      const controller = new AbortController()
+      generateControllerRef.current = controller
+      setGenerating(true)
+      setGenerateDone(false)
+      setError(null)
+      try {
+        const resp = await fetch(`${API_URL}/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: lastPrompt, language: 'python' }),
+          signal: controller.signal,
+        })
+        if (!resp.ok) {
+          const d = await resp.json().catch(() => ({}))
+          throw new Error(d.detail || `HTTP ${resp.status}`)
+        }
+        const data = await resp.json()
+        setDesign(data.design)
+        setTestbench(data.testbench)
+        setSavedDesign(data.design)
+        setLogicIssues(data.logic_issues || [])
+        if (data.verilog_intermediate) setVerilogIntermediate(data.verilog_intermediate)
+        setGenerateDone(true)
+        setTimeout(() => setGenerateDone(false), 3000)
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          // eslint-disable-next-line no-console
+          console.error('Auto-regenerate to Python failed:', e)
+          setError(`Language switch to Python failed: ${e.message}`)
+        }
+      } finally {
+        setGenerating(false)
+        generateControllerRef.current = null
+      }
+      return
+    }
+    // Unknown pair — just flip the flag.
+    setLanguage(newLanguage)
+  }, [language, generating, design, testbench, verilogIntermediate, lastPrompt])
 
   const handleVerify = useCallback(async () => {
     const controller = new AbortController()
@@ -622,7 +737,7 @@ function App() {
         setTarget={setTarget}
         selectionVerdict={selectionVerdict}
         language={language}
-        setLanguage={setLanguage}
+        setLanguage={handleLanguageChange}
       />
       <ProgressIndicator active={generating} done={generateDone} />
       <ProgressIndicator

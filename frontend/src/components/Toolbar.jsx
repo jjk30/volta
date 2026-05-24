@@ -152,8 +152,18 @@ export default function Toolbar({
             : 'verilog'
           )
         }}
-        style={{ ...selectStyle, width: '210px' }}
-        title="Source language for the design and testbench"
+        disabled={generating}
+        style={{
+          ...selectStyle,
+          width: '210px',
+          opacity: generating ? 0.5 : 1,
+          cursor: generating ? 'not-allowed' : 'pointer',
+        }}
+        title={
+          generating
+            ? 'Generation in progress — switching language is disabled'
+            : 'Source language for the design and testbench (auto-converts the current code on change)'
+        }
       >
         <option value="Verilog">Verilog</option>
         <option value="SystemVerilog">SystemVerilog</option>
