@@ -160,9 +160,13 @@ function App() {
   // Real-time verdict for the current selection (filled by /validate-selection)
   const [selectionVerdict, setSelectionVerdict] = useState(null)
 
-  // Source language ('verilog' default, 'python' = Amaranth design + Cocotb tb)
+  // Source language. Three first-class values:
+  //   'verilog'        — Verilog-2005 (default)
+  //   'systemverilog'  — IEEE-1800 SystemVerilog, compiled with iverilog -g2012
+  //   'python'         — Amaranth design + Cocotb testbench
   const [language, setLanguage] = useState('verilog')
   const isPython = language === 'python'
+  const isSystemVerilog = language === 'systemverilog'
   // In Python mode, /generate also returns the elaborated Verilog so the
   // schematic and simulate paths have a stable intermediate without
   // re-elaborating on every interaction.
@@ -512,14 +516,21 @@ function App() {
     setAutoPrompt(text)
     setPrompt(text)
 
-    // Build a preview from the per-symbol snippets — Verilog by default,
-    // Amaranth snippets in Python mode. Commented header tells the user to
-    // click GENERATE to materialise the wired-up module.
+    // Build a preview from the per-symbol snippets. The snippet field flips
+    // by language: Amaranth (Python mode), SystemVerilog (SV mode), or
+    // Verilog (default). Commented header tells the user to click GENERATE
+    // to materialise the wired-up module.
     if (isPython) {
       const snippets = selectedSymbols.map((s) =>
         `# ${s.name}\n${s.python_snippet || '# (no snippet)'}`
       )
       const preview = `# === PREVIEW: click GENERATE to build the full Amaranth module ===\n\n${snippets.join('\n\n')}\n`
+      setDesign(preview)
+    } else if (isSystemVerilog) {
+      const snippets = selectedSymbols.map((s) =>
+        `// ${s.name}\n${s.systemverilog_snippet || s.verilog || '// (no snippet)'}`
+      )
+      const preview = `// === PREVIEW: click GENERATE to build the full SystemVerilog module ===\n\n${snippets.join('\n\n')}\n`
       setDesign(preview)
     } else {
       const snippets = selectedSymbols.map((s) =>
@@ -528,7 +539,7 @@ function App() {
       const preview = `// === PREVIEW: click GENERATE to build the full module ===\n\n${snippets.join('\n\n')}\n`
       setDesign(preview)
     }
-  }, [selectedSymbols, isPython])
+  }, [selectedSymbols, isPython, isSystemVerilog])
 
   // Real-time selection validation. Debounced 300ms so rapid clicks don't
   // hammer the backend. The endpoint is deterministic and instant — no LLM.
@@ -686,9 +697,11 @@ function App() {
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <TabBar
               tabs={['DESIGN.V', 'TB_DESIGN.V', 'SCHEMATIC', 'DIAGRAM', 'WAVEFORM']}
-              labels={isPython
-                ? { 'DESIGN.V': 'DESIGN.PY', 'TB_DESIGN.V': 'TEST_DESIGN.PY' }
-                : null}
+              labels={
+                isPython         ? { 'DESIGN.V': 'DESIGN.PY', 'TB_DESIGN.V': 'TEST_DESIGN.PY' }
+                : isSystemVerilog ? { 'DESIGN.V': 'DESIGN.SV', 'TB_DESIGN.V': 'TB_DESIGN.SV' }
+                : null
+              }
               active={editorTab}
               onChange={setEditorTab}
             />

@@ -124,6 +124,65 @@ cases. Start with `module` and end with `endmodule`. No explanation."""
 
 
 # ---------------------------------------------------------------------------
+# SystemVerilog (IEEE 1800) direct-generation prompts
+# ---------------------------------------------------------------------------
+
+SV_DIRECT_GENERATE_PROMPT = """You are an expert SystemVerilog designer. Write \
+synthesizable IEEE-1800 SystemVerilog for the following hardware design.
+
+Design request: {prompt}
+
+Rules:
+1. Use `always_comb` for combinational logic, `always_ff @(posedge clk)` for
+   sequential, `always_latch` only when a latch is genuinely intended.
+2. Use `logic` for all internal signals and ports — no wire/reg split.
+3. Outputs driven inside `always_ff`/`always_comb` MUST be declared as
+   `output logic` (with appropriate width) in the port list.
+4. Include a `default:` case in any case statement (use `unique case` /
+   `priority case` only when the intent matters).
+5. Sequential designs need `clk` and `rst` inputs. On `rst == 1`, reset all
+   outputs to 0. Prefer synchronous reset unless the spec says otherwise.
+6. Use `typedef enum logic [N:0] { ... } state_t;` for FSM state.
+7. Module name should be a short snake_case identifier.
+8. Every signal used must be declared.
+9. The target compiler is iverilog with `-g2012`. Do NOT use class/program
+   blocks, dynamic arrays, mailboxes, or other simulation-only constructs.
+
+Return ONLY SystemVerilog. Start with `module` and end with `endmodule`. No \
+explanation."""
+
+
+SV_DIRECT_TESTBENCH_PROMPT = """You are an expert SystemVerilog verification \
+engineer. Write a simulation testbench for the following DUT.
+
+Design request: {prompt}
+
+DUT under test (target name: {module_name}):
+
+```sv
+{design}
+```
+
+Rules:
+1. The testbench module is named `tb_{module_name}` and has no ports.
+2. Use `logic` for all internal signals.
+3. Include `$dumpfile("dump.vcd"); $dumpvars(0, tb_{module_name});` in the
+   initial block so a VCD is produced.
+4. Drive at least one representative scenario per major operation.
+5. For sequential DUTs, generate a clock with
+       `initial clk = 0;`
+       `always #5 clk = ~clk;`
+   and assert reset (`rst = 1`) for at least 20 time units before deasserting.
+6. Use `$display` to report each scenario's result.
+7. End with `$finish;` after at most a few hundred time units.
+8. Target compiler is iverilog with `-g2012`. Do NOT use class/program
+   blocks, mailboxes, or constrained-random fanciness — keep it directed.
+
+Return ONLY SystemVerilog. Start with `module tb_{module_name};` and end with \
+`endmodule`. No explanation."""
+
+
+# ---------------------------------------------------------------------------
 # Post-processing: fix common LLM Verilog issues
 # ---------------------------------------------------------------------------
 
@@ -140,6 +199,38 @@ def _fix_verilog(verilog: str) -> str:
     code = _fix_carry_logic(code)
     code = _fix_number_literals(code)
     code = _strip_systemverilog(code)
+    return code
+
+
+def _fix_systemverilog(sv: str) -> str:
+    """Post-processing for SystemVerilog designs.
+
+    Skipped relative to the Verilog chain (would mangle modern SV):
+      * ``_fix_reg_declarations``         — rewrites ``output wire`` →
+        ``output reg``, but SV designs use ``logic`` instead.
+      * ``_fix_duplicate_reg_declarations`` — same reasoning.
+      * ``_fix_undeclared_regs``          — would inject ``reg`` decls.
+      * ``_strip_systemverilog``          — explicit SV→Verilog downconversion.
+        Killing the very dialect we just generated would defeat the point.
+      * ``_fix_undeclared_inputs`` / ``_fix_input_assignments`` — their
+        port-list regexes match ``input wire`` / ``input reg`` but NOT
+        ``input logic``, so on a clean SV module they spuriously inject an
+        ``input wire <name>`` line above the module. Drop them.
+
+    Kept (syntax-level fixes that work identically on both dialects):
+      * ``_fix_missing_semicolons``  — pure punctuation.
+      * ``_fix_integer_placement``   — declaration-before-statement is still
+        required inside ``always_ff``/``always_comb`` begin/end blocks.
+      * ``_fix_carry_logic``         — semantic predicate rewrite,
+        base-agnostic.
+      * ``_fix_number_literals``     — fixes the LLM's ``4'd1100`` →
+        ``4'b1100`` habit. The literal syntax is identical in SV.
+    """
+    code = sv
+    code = _fix_missing_semicolons(code)
+    code = _fix_integer_placement(code)
+    code = _fix_carry_logic(code)
+    code = _fix_number_literals(code)
     return code
 
 
@@ -1462,12 +1553,19 @@ endmodule"""
 # iverilog compile check
 # ---------------------------------------------------------------------------
 
-def verify_compile(design: str, testbench: str) -> tuple[bool, str]:
-    """Verify design + testbench compile together with iverilog."""
+def verify_compile(design: str, testbench: str, language: str = "verilog") -> tuple[bool, str]:
+    """Verify design + testbench compile together with iverilog.
 
+    ``language='systemverilog'`` adds ``-g2012`` so iverilog accepts modern
+    SV constructs (``logic``, ``always_ff``, packed structs, etc.). The
+    default Verilog-2005 path is unchanged.
+    """
+
+    is_sv = (language or "verilog").lower() == "systemverilog"
+    ext = "sv" if is_sv else "v"
     with tempfile.TemporaryDirectory(prefix="volta_chk_") as work_dir:
-        d_path = os.path.join(work_dir, "design.v")
-        t_path = os.path.join(work_dir, "testbench.v")
+        d_path = os.path.join(work_dir, f"design.{ext}")
+        t_path = os.path.join(work_dir, f"testbench.{ext}")
         out_path = os.path.join(work_dir, "check.out")
 
         with open(d_path, "w") as f:
@@ -1475,9 +1573,13 @@ def verify_compile(design: str, testbench: str) -> tuple[bool, str]:
         with open(t_path, "w") as f:
             f.write(testbench)
 
+        cmd = ["iverilog"]
+        if is_sv:
+            cmd += ["-g2012"]
+        cmd += ["-o", out_path, d_path, t_path]
         try:
             r = subprocess.run(
-                ["iverilog", "-o", out_path, d_path, t_path],
+                cmd,
                 capture_output=True, text=True, timeout=30,
             )
             return r.returncode == 0, r.stderr
@@ -1518,6 +1620,153 @@ def _direct_generate(prompt: str, model: str = "qwen2.5-coder:7b") -> str:
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
+
+def generate_systemverilog(prompt: str, model: str = "qwen2.5-coder:7b") -> dict:
+    """Generate a SystemVerilog design + testbench from a prompt.
+
+    Same pipeline shape as :func:`generate` (the Verilog path), with three
+    deliberate differences:
+
+      * The LLM prompt allows modern SV (``logic``, ``always_ff``,
+        ``always_comb``, ``unique case``, ``typedef enum logic [...] {...}``).
+      * Post-processing skips the four SV-to-Verilog fixes that would
+        downgrade the dialect (``_fix_reg_declarations``,
+        ``_fix_duplicate_reg_declarations``, ``_fix_undeclared_regs``,
+        ``_strip_systemverilog``). See :func:`_fix_systemverilog` for the
+        kept-vs-dropped list.
+      * The compile/synth tools get the SV flags: ``iverilog -g2012`` via
+        :func:`verify_compile`, ``read_verilog -sv`` via :func:`run_yosys`.
+
+    Returns the same dict shape as :func:`generate` plus a
+    ``design_language``/``testbench_language`` of ``"systemverilog"`` so the
+    backend response model can flag the dialect for the frontend.
+    """
+
+    print(f"\n{'=' * 60}")
+    print(f"  VOLTA — Orchestrator (SystemVerilog mode)")
+    print(f"{'=' * 60}")
+    print(f"  Prompt: {prompt}")
+
+    fallback_used: Optional[str] = None
+    correction: dict = {"ran": False, "passed": False, "attempts": 0, "errors_fixed": []}
+
+    # ------------------------------------------------------------------
+    # Step 1: Direct generation with the SV-flavored prompt. We skip the
+    # spec-interpreter path that the Verilog flow uses — the structured
+    # spec was tuned for Verilog-2005 rules ("Use Verilog-2001 only"), so
+    # forking it would be more confusing than starting clean.
+    # ------------------------------------------------------------------
+    print(f"\n  Step 1: Generating SystemVerilog via Ollama...")
+    # IMPORTANT: the SV prompts contain literal `{` / `}` (typedef enum braces,
+    # case-label examples, etc.), so .format() would mis-parse them. Use a
+    # plain string replace for the single `{prompt}` placeholder.
+    raw = call_ollama(SV_DIRECT_GENERATE_PROMPT.replace("{prompt}", prompt), model=model)
+    design = extract_verilog(raw, "")  # same fence/prose stripper works for SV
+
+    if not design or "module" not in design:
+        # One retry with a slightly simpler prompt
+        print(f"  ⚠ Empty/invalid SV — retrying with simpler prompt...")
+        retry_prompt = (
+            f"Write a minimal synthesizable SystemVerilog module for: {prompt}\n"
+            f"Use logic / always_ff / always_comb. Target iverilog -g2012. "
+            f"Return only the SV code, starting with `module` and ending with "
+            f"`endmodule`."
+        )
+        raw = call_ollama(retry_prompt, model=model)
+        design = extract_verilog(raw, "")
+
+    if not design or "module" not in design:
+        raise RuntimeError("SystemVerilog generation produced no valid module.")
+
+    design = _fix_systemverilog(design)
+    print(f"  ✓ Generated {len(design)} chars of SystemVerilog")
+
+    # ------------------------------------------------------------------
+    # Step 2: Yosys correction loop (SV-aware).
+    # ------------------------------------------------------------------
+    print(f"\n  Step 2: Running Yosys (SV mode) correction loop...")
+    try:
+        synth = run_yosys(design, language="systemverilog")
+        if synth.success:
+            print(f"  ✓ Yosys passed on first try")
+            correction = {"ran": True, "passed": True, "attempts": 1, "errors_fixed": []}
+        else:
+            initial_errors = list(synth.errors)
+            print(f"  ⚠ {len(initial_errors)} Yosys error(s) — running corrector...")
+            r = correct_verilog(design, model=model)
+            correction = {
+                "ran": True,
+                "passed": r["passed"],
+                "attempts": r["attempts"],
+                "errors_fixed": initial_errors,
+            }
+            if r["passed"]:
+                design = _fix_systemverilog(r["final_code"])
+    except Exception as e:
+        print(f"  ⚠ Correction error (non-fatal): {e}")
+
+    # ------------------------------------------------------------------
+    # Step 3: SystemVerilog testbench (LLM-generated, no downconversion).
+    # ------------------------------------------------------------------
+    print(f"\n  Step 3: Generating SystemVerilog testbench...")
+    # The module name is needed for the dump-vars target. Best-effort parse.
+    module_name = _parse_module_name(design) or "dut"
+    tb_raw = call_ollama(
+        (SV_DIRECT_TESTBENCH_PROMPT
+         .replace("{prompt}", prompt)
+         .replace("{module_name}", module_name)
+         .replace("{design}", design)),
+        model=model,
+    )
+    testbench = extract_verilog(tb_raw, f"tb_{module_name}")
+    if not testbench or "module" not in testbench:
+        # Fall back to a generated Verilog smoke testbench. iverilog -g2012
+        # accepts reg/wire too, so it still compiles in SV mode.
+        print(f"  ⚠ LLM SV testbench invalid — falling back to smoke testbench")
+        fallback_used = "smoke_testbench"
+        testbench = generate_smoke_testbench(design)
+    testbench = _fix_number_literals(testbench)
+
+    # ------------------------------------------------------------------
+    # Step 4: iverilog -g2012 compile sanity check.
+    # ------------------------------------------------------------------
+    print(f"\n  Step 4: Compile sanity check (iverilog -g2012)...")
+    compile_ok, stderr = verify_compile(design, testbench, language="systemverilog")
+    if not compile_ok:
+        print(f"  ⚠ iverilog -g2012 failed: {stderr[:200]}")
+        # Try the smoke testbench as a last resort.
+        if fallback_used != "smoke_testbench":
+            testbench = _fix_number_literals(generate_smoke_testbench(design))
+            compile_ok, stderr = verify_compile(design, testbench, language="systemverilog")
+            if compile_ok:
+                fallback_used = "smoke_testbench"
+                print(f"  ✓ Smoke testbench compiled")
+    else:
+        print(f"  ✓ Compile passed")
+
+    # ------------------------------------------------------------------
+    # Step 5: Logic validation — same regex-based checks. Most patterns
+    # apply equally to SV.
+    # ------------------------------------------------------------------
+    try:
+        logic_issues = _validate_logic(design)
+    except Exception:
+        logic_issues = []
+
+    return {
+        "design": design,
+        "testbench": testbench,
+        "spec": None,
+        "correction": correction,
+        "compile_ok": compile_ok,
+        "fallback_used": fallback_used,
+        "logic_issues": logic_issues,
+        "design_language": "systemverilog",
+        "testbench_language": "systemverilog",
+        "verilog_intermediate": "",
+        "python_warnings": [],
+    }
+
 
 def generate_python(prompt: str, model: str = "qwen2.5-coder:7b") -> dict:
     """Generate an Amaranth design + Cocotb testbench from a natural-language

@@ -410,9 +410,15 @@ async def simulate(req: SimulateRequest):
         with open(tb_path, "w") as f:
             f.write(req.testbench)
 
-        # Compile with iverilog
+        # Compile with iverilog. SystemVerilog designs need -g2012 so iverilog
+        # accepts logic/always_ff/always_comb. The Verilog default ('-g2005')
+        # is left implicit for the existing path.
+        iverilog_cmd = ["iverilog"]
+        if (req.language or "verilog").lower() == "systemverilog":
+            iverilog_cmd += ["-g2012"]
+        iverilog_cmd += ["-o", out_path, design_path, tb_path]
         compile_r = subprocess.run(
-            ["iverilog", "-o", out_path, design_path, tb_path],
+            iverilog_cmd,
             capture_output=True, text=True, timeout=30,
         )
 
@@ -509,6 +515,9 @@ async def generate(req: GenerateRequest):
         if language == "python":
             from core.orchestrator import generate_python  # lazy: avoid cold start cost in Verilog-only runs
             result = generate_python(req.prompt)
+        elif language == "systemverilog":
+            from core.orchestrator import generate_systemverilog
+            result = generate_systemverilog(req.prompt)
         else:
             result = orchestrator_generate(req.prompt)
     except RuntimeError as e:
@@ -1026,6 +1035,18 @@ class ChatRequest(BaseModel):
     logicIssues: list[LogicIssueData] = []
 
 
+# Prepended to the chat system prompt when the user is in SystemVerilog mode.
+SYSTEMVERILOG_SYSTEM_PROMPT_PREFIX = """The user is working in SystemVerilog mode (IEEE 1800). \
+Use modern SV idioms when quoting code: `logic` for nets and registers (no \
+need for the wire/reg split), `always_ff @(posedge clk)` for sequential, \
+`always_comb` for combinational, `always_latch` for level-sensitive latches, \
+`typedef enum logic [N:0] { ... } state_t;` for FSM state types, packed \
+structs/unions, `unique case`/`priority case` where the intent matters, and \
+`$urandom` for randomized testbench stimulus. The compile target is iverilog \
+with `-g2012`. Do NOT downgrade to Verilog-2005 idioms unless asked.
+
+"""
+
 # Prepended to the chat system prompt when the user is in Python mode. The
 # rest of the prompt continues to focus on HDL correctness — this just orients
 # the assistant on which idioms to use when quoting code.
@@ -1239,8 +1260,11 @@ async def chat(req: ChatRequest):
 
     # Build context with current design code
     context_parts = []
-    if (req.language or "verilog").lower() == "python":
+    chat_lang = (req.language or "verilog").lower()
+    if chat_lang == "python":
         context_parts.append(PYTHON_SYSTEM_PROMPT_PREFIX)
+    elif chat_lang == "systemverilog":
+        context_parts.append(SYSTEMVERILOG_SYSTEM_PROMPT_PREFIX)
     context_parts.append(CHAT_SYSTEM_PROMPT)
     if req.design.strip():
         context_parts.append(f"\nCurrent Verilog design:\n```verilog\n{req.design}\n```")
@@ -1421,6 +1445,7 @@ async def chat(req: ChatRequest):
 class VerifyRequest(BaseModel):
     design: str
     prompt: str = ""
+    language: str = "verilog"
 
 
 class VerifyBug(BaseModel):
@@ -2135,9 +2160,14 @@ async def verify(req: VerifyRequest):
     if end != -1:
         testbench = testbench[:end + len("endmodule")]
 
-    # Strip SystemVerilog so iverilog can compile what the LLM produced
-    testbench = _fix_systemverilog_testbench(testbench)
-    # Patch up timing for sequential designs so output checks don't read 'x'
+    # Strip SystemVerilog so iverilog can compile what the LLM produced —
+    # but ONLY for Verilog mode. In SV mode the user explicitly wants logic/
+    # always_ff/etc to stay, and iverilog -g2012 handles them.
+    is_sv = (req.language or "verilog").lower() == "systemverilog"
+    if not is_sv:
+        testbench = _fix_systemverilog_testbench(testbench)
+    # Patch up timing for sequential designs so output checks don't read 'x'.
+    # This is dialect-agnostic — works on both Verilog-2005 and SV testbenches.
     testbench = _fix_verify_timing(testbench, req.design)
 
     # Ensure VCD dump
@@ -2168,8 +2198,12 @@ async def verify(req: VerifyRequest):
                 with open(t_path, "w") as f:
                     f.write(tb_text)
 
+                iverilog_args = ["iverilog"]
+                if is_sv:
+                    iverilog_args += ["-g2012"]
+                iverilog_args += ["-o", out_path, d_path, t_path]
                 compile_r = subprocess.run(
-                    ["iverilog", "-o", out_path, d_path, t_path],
+                    iverilog_args,
                     capture_output=True, text=True, timeout=30,
                 )
 
