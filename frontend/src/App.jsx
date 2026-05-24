@@ -9,6 +9,7 @@ import SchematicView from './components/SchematicView.jsx'
 import SymbolsLibrary from './components/SymbolsLibrary.jsx'
 import ProjectExplorer from './components/ProjectExplorer.jsx'
 import ContextPanel from './components/ContextPanel.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
 import { DEFAULT_DESIGN, DEFAULT_TESTBENCH } from './defaults.js'
 
 const API_URL = 'http://localhost:8000'
@@ -630,17 +631,19 @@ function App() {
         {/* LEFT SIDEBAR */}
         <div style={{ width: `${leftWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, background: 'var(--bg-primary)' }}>
           <div style={{ height: `${leftSplitPos}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <ProjectExplorer
-              moduleName={moduleName}
-              hasDesign={hasRealCode(design)}
-              hasTestbench={hasRealCode(testbench)}
-              hasSimResult={!!simResult?.signals?.length}
-              hasErrors={simResult?.stderr ? true : false}
-              activeEditorTab={editorTab}
-              onSelectDesign={handleSelectDesignFile}
-              onSelectTestbench={handleSelectTestbenchFile}
-              language={language}
-            />
+            <ErrorBoundary fallbackTitle="PROJECT EXPLORER ERROR">
+              <ProjectExplorer
+                moduleName={moduleName}
+                hasDesign={hasRealCode(design)}
+                hasTestbench={hasRealCode(testbench)}
+                hasSimResult={!!simResult?.signals?.length}
+                hasErrors={simResult?.stderr ? true : false}
+                activeEditorTab={editorTab}
+                onSelectDesign={handleSelectDesignFile}
+                onSelectTestbench={handleSelectTestbenchFile}
+                language={language}
+              />
+            </ErrorBoundary>
           </div>
           <div
             onMouseDown={handleLeftSplitResize}
@@ -655,12 +658,14 @@ function App() {
             />
             {!symbolsCollapsed && (
               <div style={{ flex: 1, overflow: 'hidden' }}>
-                <SymbolsLibrary
-                  onSelectSymbol={handleSelectSymbol}
-                  selectedIds={selectedSymbols.map((s) => s.id)}
-                  onClear={handleClearSymbols}
-                  showHeader={false}
-                />
+                <ErrorBoundary fallbackTitle="SYMBOLS LIBRARY ERROR" onReset={handleClearSymbols}>
+                  <SymbolsLibrary
+                    onSelectSymbol={handleSelectSymbol}
+                    selectedIds={selectedSymbols.map((s) => s.id)}
+                    onClear={handleClearSymbols}
+                    showHeader={false}
+                  />
+                </ErrorBoundary>
               </div>
             )}
           </div>
@@ -702,25 +707,31 @@ function App() {
                 <EditorPane value={testbench} onChange={setTestbench} language={language} />
               </div>
               {editorTab === 'SCHEMATIC' && (
-                <SchematicView
-                  // In Python mode, render from the elaborated Verilog
-                  // intermediate so Amaranth source doesn't get fed to the
-                  // Verilog parser. Falls back to design (Amaranth) if there
-                  // is no intermediate yet, which yields the placeholder.
-                  design={isPython ? (verilogIntermediate || '') : design}
-                  hasErrors={!!simResult?.stderr}
-                  onGateClick={handleGateClick}
-                  logicIssues={logicIssues}
-                  selectedSymbols={selectedSymbols}
-                  selectionVerdict={selectionVerdict}
-                />
+                <ErrorBoundary fallbackTitle="SCHEMATIC ERROR">
+                  <SchematicView
+                    // In Python mode, render from the elaborated Verilog
+                    // intermediate so Amaranth source doesn't get fed to the
+                    // Verilog parser. Falls back to design (Amaranth) if there
+                    // is no intermediate yet, which yields the placeholder.
+                    design={isPython ? (verilogIntermediate || '') : design}
+                    hasErrors={!!simResult?.stderr}
+                    onGateClick={handleGateClick}
+                    logicIssues={logicIssues}
+                    selectedSymbols={selectedSymbols}
+                    selectionVerdict={selectionVerdict}
+                  />
+                </ErrorBoundary>
               )}
               {editorTab === 'DIAGRAM' && (
-                <DiagramView design={isPython ? (verilogIntermediate || '') : design} theme={theme} />
+                <ErrorBoundary fallbackTitle="DIAGRAM ERROR">
+                  <DiagramView design={isPython ? (verilogIntermediate || '') : design} theme={theme} />
+                </ErrorBoundary>
               )}
               {editorTab === 'WAVEFORM' && (
                 simResult?.signals?.length > 0 ? (
-                  <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} theme={theme} />
+                  <ErrorBoundary fallbackTitle="WAVEFORM ERROR">
+                    <WaveformViewer signals={simResult.signals} endTime={simResult.end_time} theme={theme} />
+                  </ErrorBoundary>
                 ) : (
                   <div style={{
                     height: '100%',
@@ -858,16 +869,18 @@ function App() {
         {/* RIGHT SIDEBAR: Volta Assistant + Context Panel */}
         <div style={{ width: `${rightWidth}px`, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ height: `${rightSplitPos}%`, overflow: 'hidden' }}>
-            <ChatBot
-              design={design}
-              testbench={testbench}
-              autoMessage={chatAutoMessage}
-              simResult={simResult}
-              selectedSymbols={selectedSymbols}
-              logicIssues={logicIssues}
-              selectionVerdict={selectionVerdict}
-              language={language}
-            />
+            <ErrorBoundary fallbackTitle="VOLTA ASSISTANT ERROR">
+              <ChatBot
+                design={design}
+                testbench={testbench}
+                autoMessage={chatAutoMessage}
+                simResult={simResult}
+                selectedSymbols={selectedSymbols}
+                logicIssues={logicIssues}
+                selectionVerdict={selectionVerdict}
+                language={language}
+              />
+            </ErrorBoundary>
           </div>
           <div
             onMouseDown={handleRightSplitResize}
@@ -876,13 +889,15 @@ function App() {
             onMouseLeave={(e) => e.target.style.background = 'var(--border)'}
           />
           <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-            <ContextPanel
-              moduleName={moduleName}
-              portCount={portCount}
-              gateCount={null}
-              target={target}
-              synthResult={synthResult}
-            />
+            <ErrorBoundary fallbackTitle="CONTEXT PANEL ERROR">
+              <ContextPanel
+                moduleName={moduleName}
+                portCount={portCount}
+                gateCount={null}
+                target={target}
+                synthResult={synthResult}
+              />
+            </ErrorBoundary>
           </div>
         </div>
       </div>

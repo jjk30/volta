@@ -87,30 +87,22 @@ ollama list
 
 This downloads Qwen2.5-Coder-7B (~4.7GB) — a code-specialized LLM with strong Verilog generation capabilities, licensed under Apache 2.0.
 
-### 3. Install backend dependencies
+## Setup (one-time)
 
 ```bash
-cd backend
-pip install -r requirements.txt
-pip install requests pydantic
-cd ..
+cd ~/volta
+python -m venv venv
+source venv/bin/activate
+pip install -e ".[dev]"
 ```
 
-### 4. Install frontend dependencies
-
-```bash
-cd frontend
-npm install
-cd ..
-```
-
----
+This installs Volta as an editable package — `from core.llm_client import call_ollama` works from any working directory, so the backend, the test suites, and any ad-hoc scripts share one Python environment with no `sys.path` hackery.
 
 ## Running
 
 You need **three terminals** (or use background processes):
 
-### Terminal 1: Ollama
+### Terminal 1 — Ollama
 
 ```bash
 ollama serve
@@ -118,11 +110,12 @@ ollama serve
 
 If already running, skip this.
 
-### Terminal 2: Backend (FastAPI)
+### Terminal 2 — Backend
 
 ```bash
-cd backend
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+cd ~/volta
+source venv/bin/activate
+python backend/main.py
 ```
 
 The API runs at `http://localhost:8000`. Endpoints:
@@ -131,10 +124,11 @@ The API runs at `http://localhost:8000`. Endpoints:
 - `POST /chat` — Hardware design assistant
 - `GET /health` — Health check
 
-### Terminal 3: Frontend (Vite)
+### Terminal 3 — Frontend
 
 ```bash
-cd frontend
+cd ~/volta/frontend
+npm install
 npm run dev
 ```
 

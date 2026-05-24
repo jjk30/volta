@@ -22,12 +22,11 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from schema import DesignSpec, ModuleSpec, PortDirection, SignalType
-from spec_interpreter import interpret, _sanitize_identifier, _guess_module_name
-from rtl_generator import extract_verilog
-from llm_client import call_ollama
-from correction_engine import correct as correct_verilog, run_yosys
+from core.schema import DesignSpec, ModuleSpec, PortDirection, SignalType
+from core.spec_interpreter import interpret, _sanitize_identifier, _guess_module_name
+from core.rtl_generator import extract_verilog
+from core.llm_client import call_ollama
+from core.correction_engine import correct as correct_verilog, run_yosys
 
 
 # ---------------------------------------------------------------------------
@@ -1551,8 +1550,8 @@ def generate_python(prompt: str, model: str = "qwen2.5-coder:7b") -> dict:
     print(f"  Prompt: {prompt}")
 
     # Lazy import so Verilog-only sessions don't pay the Amaranth import cost
-    from amaranth_generator import generate_amaranth, AmaranthElaborationError
-    from testbench_generator import generate_cocotb_testbench
+    from core.amaranth_generator import generate_amaranth, AmaranthElaborationError
+    from core.testbench_generator import generate_cocotb_testbench
 
     spec = None
     warnings: list[str] = []

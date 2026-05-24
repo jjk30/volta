@@ -21,10 +21,8 @@ import tempfile
 import textwrap
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from llm_client import call_ollama
-from schema import ModuleSpec
+from core.llm_client import call_ollama
+from core.schema import ModuleSpec
 
 
 # ---------------------------------------------------------------------------

@@ -12,9 +12,8 @@ import sys
 import subprocess
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from schema import SynthesisResult
-from llm_client import call_ollama
+from core.schema import SynthesisResult
+from core.llm_client import call_ollama
 
 
 # ---------------------------------------------------------------------------
