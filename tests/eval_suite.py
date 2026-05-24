@@ -17,10 +17,8 @@ import sys
 import time
 from datetime import datetime
 
-# Make core/ importable
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-sys.path.insert(0, os.path.join(PROJECT_ROOT, "core"))
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +148,7 @@ def eval_single(idx: int, total: int, entry: dict) -> dict:
     start = time.time()
 
     try:
-        from orchestrator import generate
+        from core.orchestrator import generate
         out = generate(prompt)
 
         elapsed = time.time() - start

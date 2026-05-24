@@ -13,8 +13,7 @@ import tempfile
 import textwrap
 import xml.etree.ElementTree as ET
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from schema import (
+from core.schema import (
     DesignSpec,
     ModuleSpec,
     SimulationResult,
@@ -325,7 +324,7 @@ def generate_testbenches(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    from schema import EXAMPLE_ALU
+    from core.schema import EXAMPLE_ALU
 
     print("=" * 60)
     print("  VOLTA — Testbench Generator")

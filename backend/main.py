@@ -20,8 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Make core/ importable
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
-from orchestrator import generate as orchestrator_generate
+from core.orchestrator import generate as orchestrator_generate
 
 logger = logging.getLogger("volta.backend")
 
@@ -217,8 +216,7 @@ async def _simulate_python(req: SimulateRequest) -> SimulateResponse:
     verilog_src = (req.verilog_intermediate or "").strip()
     if not verilog_src:
         # Lazy import keeps the Amaranth dependency out of the Verilog hot path
-        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
-        from amaranth_generator import _elaborate, AmaranthElaborationError
+        from core.amaranth_generator import _elaborate, AmaranthElaborationError
         try:
             verilog_src = _elaborate(req.design)
         except AmaranthElaborationError as e:
@@ -509,7 +507,7 @@ async def generate(req: GenerateRequest):
 
     try:
         if language == "python":
-            from orchestrator import generate_python  # lazy: avoid cold start cost in Verilog-only runs
+            from core.orchestrator import generate_python  # lazy: avoid cold start cost in Verilog-only runs
             result = generate_python(req.prompt)
         else:
             result = orchestrator_generate(req.prompt)

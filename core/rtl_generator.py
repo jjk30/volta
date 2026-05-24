@@ -9,9 +9,8 @@ import sys
 import subprocess
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from schema import DesignSpec, ModuleSpec, PortDirection, SignalType
-from llm_client import call_ollama
+from core.schema import DesignSpec, ModuleSpec, PortDirection, SignalType
+from core.llm_client import call_ollama
 
 
 def build_prompt(module: ModuleSpec) -> str:
@@ -146,7 +145,7 @@ def save_verilog(results: dict, output_dir: str = "output"):
 
 
 if __name__ == "__main__":
-    from schema import EXAMPLE_ALU
+    from core.schema import EXAMPLE_ALU
 
     print("=" * 50)
     print("  VOLTA — RTL Generator")

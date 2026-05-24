@@ -14,8 +14,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from schema import (
+from core.schema import (
     DesignSpec,
     DesignComplexity,
     ModuleCategory,
@@ -26,7 +25,7 @@ from schema import (
     SignalType,
     TestVector,
 )
-from llm_client import call_ollama
+from core.llm_client import call_ollama
 
 
 # ---------------------------------------------------------------------------
