@@ -280,3 +280,5 @@ To change the LLM model, edit the `model` parameter in `core/spec_interpreter.py
 ## License
 
 MIT
+
+Still incomplete, will be done soon
