@@ -1,6 +1,6 @@
 # Volta
 
-AI-powered Verilog IDE. Describe a hardware design in natural language, get synthesizable Verilog, simulate it, and visualize waveforms — all in the browser.
+AI-powered Verilog IDE. Describe a hardware design in natural language, get synthesizable Verilog, simulate it, and visualize waveforms, all in the browser.
 
 Volta uses a local LLM (Qwen2.5-Coder-7B via Ollama, Apache 2.0 licensed) to interpret design prompts into structured specs, generate Verilog RTL, auto-fix synthesis errors with Yosys, build testbenches, and compile with Icarus Verilog. The frontend is a terminal-themed split-pane editor with a block diagram viewer, waveform display, symbols library, and an integrated chat assistant.
 
