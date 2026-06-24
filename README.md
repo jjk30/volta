@@ -1,4 +1,4 @@
-# Volta
+# Volta (Not complete yet)
 
 AI-powered Verilog IDE. Describe a hardware design in natural language, get synthesizable Verilog, simulate it, and visualize waveforms, all in the browser.
 
